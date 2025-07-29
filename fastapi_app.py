@@ -33,7 +33,7 @@ app = FastAPI(title="HackRx PDF RAG API", version="1.0.0")
 security = HTTPBearer()
 
 # API Key validation
-VALID_API_KEY = "hackrx-2025-secure-key"
+VALID_API_KEY = "2931609bd36ec1a45cb577b3b831dc711c76ae157b3c6250c564284c93b062ff"
 
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Verify the API key from Bearer token"""
