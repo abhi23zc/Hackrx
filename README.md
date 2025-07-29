@@ -75,8 +75,8 @@ pip install -r requirements.txt
 Create a `.env` file:
 ```bash
 # API Configuration
-API_KEY=hackrx-2024-secure-key
-GEMINI_API_KEY=your-gemini-api-key
+API_KEY=hackrx-2025-secure-key
+
 
 # Server Configuration
 HOST=0.0.0.0

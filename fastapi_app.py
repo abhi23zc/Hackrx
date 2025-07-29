@@ -33,7 +33,7 @@ app = FastAPI(title="HackRx PDF RAG API", version="1.0.0")
 security = HTTPBearer()
 
 # API Key validation
-VALID_API_KEY = "hackrx-2024-secure-key"
+VALID_API_KEY = "hackrx-2025-secure-key"
 
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
     """Verify the API key from Bearer token"""
@@ -202,7 +202,7 @@ class PDFRAGPipeline:
 # Initialize pipeline
 pipeline = PDFRAGPipeline()
 
-@app.post("/hackrx/run", response_model=AnswerResponse)
+@app.post("/api/v1/hackrx/run", response_model=AnswerResponse)
 async def process_questions(
     request: QuestionRequest,
     api_key: str = Depends(verify_api_key)
