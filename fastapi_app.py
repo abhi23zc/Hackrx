@@ -61,7 +61,7 @@ class PDFRAGPipeline:
         """Configure Groq API with efficient settings"""
         try:
             # Use environment variable for API key
-            groq_api_key = os.getenv("GROQ_API_KEY", "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")
+            groq_api_key = os.getenv("GROQ_API_KEY", "")
             self.groq_client = AsyncGroq(api_key=groq_api_key)
             self.model_name = "llama-3.3-70b-versatile"  # Most efficient model
             logger.info("✅ Groq API configured successfully")
