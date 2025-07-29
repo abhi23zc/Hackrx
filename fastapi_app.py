@@ -50,10 +50,11 @@ class AnswerResponse(BaseModel):
     answers: List[str]
 
 # Global pipeline state
+# In PDFRAGPipeline.__init__, change the path
 class PDFRAGPipeline:
     def __init__(self):
         self.setup_gemini()
-        self.vector_store_path = "temp_vector_store"
+        self.vector_store_path = "vector_store"  # Changed from "temp_vector_store"
         
     def setup_gemini(self):
         """Configure Gemini API"""
