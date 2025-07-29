@@ -8,6 +8,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, HttpUrl
 import logging
 import time
+from groq import AsyncGroq
+import json
 
 # Import our existing pipeline components
 from pdf_extractor import extract_pdf_content
@@ -17,7 +19,8 @@ from faiss_store import create_faiss_index, save_metadata
 from retriever_reranker import retrieve_top_k, rerank_chunks
 from prompt_builder import build_prompt_without_sources
 
-import google.generativeai as genai
+# Remove Google imports
+# import google.generativeai as genai
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -49,25 +52,25 @@ class QuestionRequest(BaseModel):
 class AnswerResponse(BaseModel):
     answers: List[str]
 
-# Global pipeline state
-# In PDFRAGPipeline.__init__, change the path
 class PDFRAGPipeline:
     def __init__(self):
-        self.setup_gemini()
-        self.vector_store_path = "vector_store"  # Changed from "temp_vector_store"
+        self.setup_groq()
+        self.vector_store_path = "vector_store"
         
-    def setup_gemini(self):
-        """Configure Gemini API"""
+    def setup_groq(self):
+        """Configure Groq API with efficient settings"""
         try:
-            genai.configure(api_key="AIzaSyAb2K0HUEY2b7lqcwE6qUrcxByxUN3D6ds")
-            self.model = genai.GenerativeModel("gemini-2.5-pro")
-            logger.info("✅ Gemini API configured successfully")
+            # Use environment variable for API key
+            groq_api_key = os.getenv("GROQ_API_KEY", "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")
+            self.groq_client = AsyncGroq(api_key=groq_api_key)
+            self.model_name = "llama-3.3-70b-versatile"  # Most efficient model
+            logger.info("✅ Groq API configured successfully")
         except Exception as e:
-            logger.error(f"❌ Failed to configure Gemini: {e}")
+            logger.error(f"❌ Failed to configure Groq: {e}")
             raise
     
     async def download_pdf(self, url: str) -> bytes:
-        """Download PDF from URL"""
+        """Download PDF from URL (unchanged)"""
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
@@ -85,7 +88,7 @@ class PDFRAGPipeline:
             )
     
     async def process_pdf(self, pdf_content: bytes) -> dict:
-        """Process PDF content through the pipeline"""
+        """Process PDF content through the pipeline (optimized)"""
         try:
             # Save PDF temporarily
             temp_pdf_path = "temp_document.pdf"
@@ -102,7 +105,7 @@ class PDFRAGPipeline:
             chunks = chunk_text(pdf_data["pages"])
             logger.info(f"✅ Created {len(chunks)} chunks")
             
-            # Step 3: Generate embeddings
+            # Step 3: Generate embeddings (batch processing)
             logger.info("🧠 Generating embeddings...")
             texts, embeddings = generate_embeddings(chunks)
             logger.info(f"✅ Generated embeddings: {embeddings.shape}")
@@ -136,30 +139,13 @@ class PDFRAGPipeline:
             )
     
     async def answer_questions(self, questions: List[str]) -> List[str]:
-        """Answer questions based on processed document"""
+        """Answer questions using Groq with optimized batch processing"""
         try:
             answers = []
             
-            for question in questions:
-                logger.info(f"🔍 Processing question: {question}")
-                
-                # Step 1: Retrieve relevant chunks
-                retrieved = retrieve_top_k(question, k=10)
-                logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks")
-                
-                # Step 2: Rerank chunks
-                reranked = rerank_chunks(question, retrieved, top_n=5)
-                logger.info(f"✅ Reranked to top {len(reranked)} chunks")
-                
-                # Step 3: Build prompt and generate answer
-                prompt = build_prompt_without_sources(question, reranked)
-                
-                # Step 4: Get answer from Gemini
-                response = self.model.generate_content(prompt)
-                answer = response.text.strip()
-                answers.append(answer)
-                
-                logger.info(f"✅ Generated answer for question")
+            # Process questions in parallel for efficiency
+            tasks = [self._process_single_question(question) for question in questions]
+            answers = await asyncio.gather(*tasks)
             
             return answers
             
@@ -168,6 +154,50 @@ class PDFRAGPipeline:
                 status_code=500,
                 detail=f"Error answering questions: {str(e)}"
             )
+    
+    async def _process_single_question(self, question: str) -> str:
+        """Process a single question with Groq"""
+        try:
+            logger.info(f"🔍 Processing question: {question}")
+            
+            # Step 1: Retrieve relevant chunks
+            retrieved = retrieve_top_k(question, k=10)
+            logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks")
+            
+            # Step 2: Rerank chunks
+            reranked = rerank_chunks(question, retrieved, top_n=5)
+            logger.info(f"✅ Reranked to top {len(reranked)} chunks")
+            
+            # Step 3: Build optimized prompt
+            prompt = build_prompt_without_sources(question, reranked)
+            
+            # Step 4: Get answer from Groq with optimized settings
+            response = await self.groq_client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful AI assistant that provides accurate, concise answers based on the provided context. Focus on being factual and relevant."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                max_tokens=1024,
+                temperature=0.1,  # Low temperature for factual accuracy
+                top_p=0.9,
+                stream=False
+            )
+            
+            answer = response.choices[0].message.content.strip()
+            logger.info("✅ Generated answer for question")
+            
+            return answer
+            
+        except Exception as e:
+            logger.error(f"Error processing question: {e}")
+            return f"I encountered an error answering this question: {str(e)}"
 
 # Initialize pipeline
 pipeline = PDFRAGPipeline()
@@ -178,7 +208,7 @@ async def process_questions(
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Process PDF document and answer questions
+    Process PDF document and answer questions using Groq
     
     - **documents**: URL to PDF document
     - **questions**: List of questions to answer
@@ -194,8 +224,8 @@ async def process_questions(
         logger.info("🔄 Processing PDF through pipeline...")
         process_result = await pipeline.process_pdf(pdf_content)
         
-        # Answer questions
-        logger.info("🤖 Answering questions...")
+        # Answer questions using Groq
+        logger.info("🤖 Answering questions with Groq...")
         answers = await pipeline.answer_questions(request.questions)
         
         # Cleanup vector store
@@ -220,7 +250,7 @@ async def process_questions(
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "hackrx-rag-api"}
+    return {"status": "healthy", "service": "hackrx-rag-api", "ai_provider": "groq"}
 
 if __name__ == "__main__":
     import uvicorn
@@ -229,6 +259,6 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         reload=True,
-        ssl_keyfile=None,  # Add your SSL certificates for HTTPS
+        ssl_keyfile=None,
         ssl_certfile=None
     )
