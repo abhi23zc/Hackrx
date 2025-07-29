@@ -87,3 +87,5 @@ uvicorn[standard]==0.24.0
 aiohttp
 python-multipart==0.0.6
 httpx==0.28.1
+
+groq==0.18.0

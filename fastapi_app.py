@@ -61,7 +61,7 @@ class PDFRAGPipeline:
         """Configure Groq API with efficient settings"""
         try:
             # Use environment variable for API key
-            groq_api_key = os.getenv("GROQ_API_KEY", "")
+            groq_api_key = os.getenv("GROQ_API_KEY", "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")
             self.groq_client = AsyncGroq(api_key=groq_api_key)
             self.model_name = "llama-3.3-70b-versatile"  # Most efficient model
             logger.info("✅ Groq API configured successfully")
@@ -161,11 +161,11 @@ class PDFRAGPipeline:
             logger.info(f"🔍 Processing question: {question}")
             
             # Step 1: Retrieve relevant chunks
-            retrieved = retrieve_top_k(question, k=10)
+            retrieved = retrieve_top_k(question, k=5)
             logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks")
             
             # Step 2: Rerank chunks
-            reranked = rerank_chunks(question, retrieved, top_n=5)
+            reranked = rerank_chunks(question, retrieved, top_n=3)
             logger.info(f"✅ Reranked to top {len(reranked)} chunks")
             
             # Step 3: Build optimized prompt
