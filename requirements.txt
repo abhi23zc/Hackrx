@@ -1,5 +1,5 @@
 annotated-types==0.7.0
-anyio==4.9.0
+anyio>=3.7.1,<4.0.0
 cachetools==5.5.2
 certifi==2025.7.14
 cffi==1.17.1
@@ -81,3 +81,9 @@ uritemplate==4.2.0
 urllib3==2.5.0
 uuid==1.30
 zstandard==0.23.0
+
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+aiohttp
+python-multipart==0.0.6
+httpx==0.28.1
