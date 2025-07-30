@@ -75,7 +75,7 @@ pip install -r requirements.txt
 Create a `.env` file:
 ```bash
 # API Configuration
-AUTH_TOKEN=2931609bd36ec1a45cb577b3b831dc711c76ae157b3c6250c564284c93b062ff
+API_KEY=hackrx-2025-secure-key
 
 
 # Server Configuration
