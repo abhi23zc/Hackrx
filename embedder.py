@@ -52,11 +52,11 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 # Load model only once
-model = SentenceTransformer("all-MiniLM-L6-v2")
+model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
 def generate_embeddings(chunks, batch_size=32):
     """
-    Efficiently generate embeddings using all-MiniLM-L6-v2.
+    Efficiently generate embeddings using BAAI/bge-small-en-v1.5.
     
     Args:
         chunks: List of dicts with 'text' (from chunker)
