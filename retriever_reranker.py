@@ -10,7 +10,7 @@ from sentence_transformers import SentenceTransformer
 # Device configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-embed_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
+embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 # ---- Reranker Model: BGE Reranker Large ----
 reranker_model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"

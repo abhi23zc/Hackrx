@@ -177,7 +177,7 @@ class PDFRAGPipeline:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\nCRITICAL RULES:\n- Answer exactly what is asked with the most important details only\n- Include specific numbers, time periods, and key conditions\n- Keep answers to 1-2 sentences maximum\n- Use clear, professional language\n- Focus on the core information requested\n- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\nIMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources."
+                        "content": "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\nCRITICAL RULES:\n- Answer exactly what is asked with the most important details only\n- Include specific numbers, time periods, and key conditions\n- Keep answers to 1-2 sentences maximum\n- Use clear, professional language\n- Focus on the core information requested\n- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\nIMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question."
                     },
                     {
                         "role": "user",

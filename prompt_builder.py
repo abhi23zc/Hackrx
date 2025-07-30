@@ -22,7 +22,7 @@ def build_prompt_with_sources(query, context_chunks, max_chars=4000):
     intro += "- Use clear, professional language\n"
     intro += "- Focus on the core information requested\n"
     intro += "- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\n"
-    intro += "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources.\n\n"
+    intro += "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question.\n\n"
     
     context_header = "### Context:\n"
     prompt_header = "\n### Question:\n"
@@ -69,7 +69,7 @@ def build_prompt_without_sources(query, context_chunks, max_chars=6000):
         "- Use clear, professional language\n"
         "- Focus on the core information requested\n"
         "- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\n"
-        "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources.\n\n"
+        "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question.\n\n"
     )
 
     context_header = "### Context:\n"
