@@ -61,7 +61,7 @@ class PDFRAGPipeline:
         """Configure Groq API with efficient settings"""
         try:
             # Use environment variable for API key
-            groq_api_key = os.getenv("GROQ_API_KEY", "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")
+            groq_api_key = os.getenv("GROQ_API_KEY", "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")
             self.groq_client = AsyncGroq(api_key=groq_api_key)
             self.model_name = "llama-3.3-70b-versatile"  # Most efficient model
             logger.info("✅ Groq API configured successfully")
@@ -177,7 +177,7 @@ class PDFRAGPipeline:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful AI assistant that provides accurate, concise answers based on the provided context. Focus on being factual and relevant."
+                        "content": "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\nCRITICAL RULES:\n- Answer exactly what is asked with the most important details only\n- Include specific numbers, time periods, and key conditions\n- Keep answers to 1-2 sentences maximum\n- Use clear, professional language\n- Focus on the core information requested\n- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\nIMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources."
                     },
                     {
                         "role": "user",
