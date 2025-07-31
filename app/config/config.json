@@ -2,7 +2,7 @@
   "EMBEDDINGS_DIR": "embeddings",
   "MODEL_NAME": "llama-3.3-70b-versatile",
   "GROQ_KEY": "",
-  "VALID_API_KEY": "",
+  "VALID_API_KEY": "2931609bd36ec1a45cb577b3b831dc711c76ae157b3c6250c564284c93b062ff",
 
   "LLM_CONFIG": {
     "TEMPERATURE": 0.7,
