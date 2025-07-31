@@ -16,7 +16,7 @@ import re      # NEW: for sanitizing filenames
 # Import our existing pipeline components
 from pdf_extractor import extract_pdf_content
 from chunker import chunk_text
-from embedder import generate_embeddings
+from embedder import model, generate_embeddings, generate_openai_embeddings
 from faiss_store import create_faiss_index, save_metadata
 from retriever_reranker import retrieve_top_k, rerank_chunks
 from prompt_builder import build_prompt_without_sources
@@ -104,9 +104,9 @@ class PDFRAGPipeline:
         """Configure Groq API with efficient settings"""
         try:
             # Use environment variable for API key
-            groq_api_key = os.getenv("GROQ_API_KEY", "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")
+            groq_api_key = os.getenv("GROQ_API_KEY", "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")
             self.groq_client = AsyncGroq(api_key=groq_api_key)
-            self.model_name = "llama-3.3-70b-versatile"  # Most efficient model
+            self.model_name = "llama-3.3-70b-versatile"  # Most efficient model gemma qwen mistral
             logger.info("✅ Groq API configured successfully")
         except Exception as e:
             logger.error(f"❌ Failed to configure Groq: {e}")
@@ -135,7 +135,6 @@ class PDFRAGPipeline:
         try:
             sanitized = sanitize_filename(file_link) if file_link else None
             pkl_path = os.path.join(EMBEDDINGS_DIR, f"{sanitized}.pkl") if sanitized else None
-            # Removed: If file_link is provided and .pkl exists, load and return cached result
             # Save PDF temporarily
             temp_pdf_path = "temp_document.pdf"
             with open(temp_pdf_path, "wb") as f:
@@ -144,14 +143,14 @@ class PDFRAGPipeline:
             logger.info("🔍 Extracting PDF content...")
             pdf_data = extract_pdf_content(temp_pdf_path)
             logger.info(f"✅ Extracted {len(pdf_data['pages'])} pages")
-            # Step 2: Chunk the text
+            # Step 2: Chunk the text (reverted to RecursiveCharacterTextSplitter)
             logger.info("✂️ Chunking text...")
             chunks = chunk_text(pdf_data["pages"])
             logger.info(f"✅ Created {len(chunks)} chunks")
             # Step 3: Generate embeddings (batch processing)
-            logger.info("🧠 Generating embeddings...")
+            logger.info("🧠 Generating embeddings with HuggingFace model...")
             texts, embeddings = generate_embeddings(chunks)
-            logger.info(f"✅ Generated embeddings: {embeddings.shape}")
+            logger.info(f"✅ Generated embeddings: {getattr(embeddings, 'shape', type(embeddings))}")
             # Step 4: Store in FAISS
             logger.info("💾 Storing in vector database...")
             os.makedirs(self.vector_store_path, exist_ok=True)
@@ -210,10 +209,21 @@ class PDFRAGPipeline:
             # Step 1: Retrieve relevant chunks
             retrieved = retrieve_top_k(question, k=5)
             logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks")
+            if not retrieved:
+                logger.error("No relevant chunks retrieved for question.")
+                return "Information not available in the provided document."
 
             # Step 2: Rerank chunks
             reranked = rerank_chunks(question, retrieved, top_n=3)
             logger.info(f"✅ Reranked to top {len(reranked)} chunks")
+            if not reranked:
+                logger.error("No chunks after reranking.")
+                return "Information not available in the provided document."
+
+            # Log the full reranked chunks being sent with the prompt
+            logger.info("📦 Chunks sent with prompt:")
+            for i, chunk in enumerate(reranked):
+                logger.info(f"Chunk {i}: {chunk}")
 
             # Step 3: Build optimized prompt
             prompt = build_prompt_without_sources(question, reranked)
@@ -246,7 +256,7 @@ class PDFRAGPipeline:
             return answer
 
         except Exception as e:
-            logger.error(f"Error processing question: {e}")
+            logger.error(f"Error processing question: {repr(e)}", exc_info=True)
             return f"I encountered an error answering this question: {str(e)}"
 
 # Initialize pipeline

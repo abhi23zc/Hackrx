@@ -37,7 +37,7 @@ def load_index_and_metadata(index_path: str = "vector_store/index.faiss",
     return index, metadata
 
 
-def retrieve_top_k(query: str, k: int = 10) -> List[Dict]:
+def retrieve_top_k(query: str, k: int = 5) -> List[Dict]:
     """
     Retrieve top-K similar chunks from FAISS index using dense embedding.
 
@@ -69,7 +69,7 @@ def retrieve_top_k(query: str, k: int = 10) -> List[Dict]:
     return results
 
 
-def rerank_chunks(query: str, chunks: List[Dict], top_n: int = 5) -> List[Dict]:
+def rerank_chunks(query: str, chunks: List[Dict], top_n: int = 3) -> List[Dict]:
     """
     Rerank retrieved chunks using a Cross-Encoder (reranker model).
 
