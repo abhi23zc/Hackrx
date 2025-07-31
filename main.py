@@ -5,12 +5,12 @@ import time
 from pathlib import Path
 
 # Import all our pipeline components
-from pdf_extractor import extract_pdf_content
-from chunker import chunk_text
-from embedder import generate_embeddings
-from faiss_store import create_faiss_index, save_metadata
+from app.utils.pdf_extractor import extract_pdf_content
+from app.utils.chunker import chunk_text
+from app.utils.embedder import generate_embeddings
+from app.utils.faiss_store import create_faiss_index, save_metadata
 from retriever_reranker import retrieve_top_k, rerank_chunks
-from prompt_builder import build_prompt_without_sources
+from app.utils.prompt_builder import build_prompt_without_sources
 
 import google.generativeai as genai
 
