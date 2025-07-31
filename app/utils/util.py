@@ -1,7 +1,7 @@
 
 import re
 import json
-
+import logging
 from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -11,8 +11,11 @@ def load_config():
     """
     Load configuration from config.json.
     """
-    with open('config/config.json', 'r') as file:
-        return json.load(file)
+    with open('./app/config/config.json', 'r') as file:
+        config_data = json.load(file)
+    print(config_data)
+    logging.info("Configuration loaded successfully.")
+    return config_data
 
 
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
@@ -25,6 +28,8 @@ def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security
             status_code=401,
             detail="Invalid API Key"
         )
+    
+    logging.info("API Key verified successfully.")
     return credentials.credentials
 
 

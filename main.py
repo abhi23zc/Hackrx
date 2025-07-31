@@ -1,183 +1,88 @@
 import os
-import sys
+import logging
+import uvicorn
 import json
-import time
-from pathlib import Path
+import hashlib
 
-# Import all our pipeline components
-from app.utils.pdf_extractor import extract_pdf_content
-from app.utils.chunker import chunk_text
-from app.utils.embedder import generate_embeddings
-from app.utils.faiss_store import create_faiss_index, save_metadata
-from retriever_reranker import retrieve_top_k, rerank_chunks
-from app.utils.prompt_builder import build_prompt_without_sources
+# Import our existing pipeline components
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException, Depends, status
+from app.utils.util import verify_api_key
+from app.core.models import llm_response_generator
+from app.schema.schema import QuestionRequest, AnswerResponse
 
-import google.generativeai as genai
+logging.basicConfig(format='%(asctime)s - %(levelname)s - Line: %(lineno)d - %(message)s', 
+                    datefmt='%Y-%m-%d %H:%M:%S', 
+                    level=logging.INFO)
 
-class PDFRAGPipeline:
-    def __init__(self, api_key=None):
-        """
-        Initialize the PDF RAG Pipeline
-        
-        Args:
-            api_key: Gemini API key (optional, will use hardcoded if not provided)
-        """
-        self.api_key = api_key or "AIzaSyAb2K0HUEY2b7lqcwE6qUrcxByxUN3D6ds"
-        self.setup_gemini()
-        self.vector_store_path = "vector_store"
-        
-    def setup_gemini(self):
-        """Configure Gemini API"""
-        try:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel("gemini-2.5-flash")
-            print("✅ Gemini API configured successfully")
-        except Exception as e:
-            print(f"❌ Failed to configure Gemini: {e}")
-            sys.exit(1)
-    
-    def process_pdf(self, pdf_path):
-        """
-        Complete PDF processing pipeline
-        
-        Args:
-            pdf_path: Path to the PDF file
-            
-        Returns:
-            dict: Processing results with metadata
-        """
-        if not os.path.exists(pdf_path):
-            return {"error": f"PDF file not found: {pdf_path}"}
-        
-        print(f"📄 Processing PDF: {pdf_path}")
-        
-        try:
-            # Step 1: Extract PDF content
-            print("🔍 Extracting PDF content...")
-            pdf_data = extract_pdf_content(pdf_path)
-            print(f"✅ Extracted {len(pdf_data['pages'])} pages")
-            
-            # Step 2: Chunk the text
-            print("✂️ Chunking text...")
-            chunks = chunk_text(pdf_data["pages"])
-            print(f"✅ Created {len(chunks)} chunks")
-            
-            # Step 3: Generate embeddings
-            print("🧠 Generating embeddings...")
-            texts, embeddings = generate_embeddings(chunks)
-            print(f"✅ Generated embeddings: {embeddings.shape}")
-            
-            # Step 4: Store in FAISS
-            print("💾 Storing in vector database...")
-            os.makedirs(self.vector_store_path, exist_ok=True)
-            create_faiss_index(embeddings, 
-                             index_path=os.path.join(self.vector_store_path, "index.faiss"))
-            save_metadata(chunks, 
-                        meta_path=os.path.join(self.vector_store_path, "metadata.json"))
-            print("✅ Vector store created successfully")
-            
-            return {
-                "success": True,
-                "pages": len(pdf_data['pages']),
-                "chunks": len(chunks),
-                "embeddings_shape": embeddings.shape,
-                "vector_store_path": self.vector_store_path
-            }
-            
-        except Exception as e:
-            return {"error": str(e)}
-    
-    def query_document(self, question, top_k=10, top_n=5):
-        """
-        Query the processed document
-        
-        Args:
-            question: User's question
-            top_k: Number of chunks to retrieve initially
-            top_n: Number of chunks to use for final answer
-            
-        Returns:
-            dict: Query results with answer and metadata
-        """
-        if not os.path.exists(os.path.join(self.vector_store_path, "index.faiss")):
-            return {"error": "No document processed. Please upload and process a PDF first."}
-        
-        try:
-            print(f"🔍 Querying: {question}")
-            
-            # Step 1: Retrieve relevant chunks
-            retrieved = retrieve_top_k(question, k=top_k)
-            print(f"✅ Retrieved {len(retrieved)} relevant chunks")
-            
-            # Step 2: Rerank chunks
-            reranked = rerank_chunks(question, retrieved, top_n=top_n)
-            print(f"✅ Reranked to top {len(reranked)} chunks")
-            
-            # Step 3: Build prompt and generate answer
-            prompt = build_prompt_without_sources(question, reranked)
-            
-            # Step 4: Get answer from Gemini
-            response = self.model.generate_content(prompt)
-            answer = response.text.strip()
-            
-            return {
-                "success": True,
-                "question": question,
-                "answer": answer,
-                "sources_used": len(reranked),
-                "source_pages": list(set([chunk['page'] for chunk in reranked]))
-            }
-            
-        except Exception as e:
-            return {"error": str(e)}
 
-def main():
-    """Interactive CLI interface"""
-    pipeline = PDFRAGPipeline()
-    
-    print("🚀 PDF RAG Pipeline Started")
-    print("=" * 50)
-    
-    while True:
-        print("\n📋 Menu:")
-        print("1. Upload and Process PDF")
-        print("2. Ask Question")
-        print("3. Exit")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+# Load config.json at startup
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    import json
+    config_path = os.path.join(os.path.dirname(__file__), "app", "config", "config.json")
+    with open(config_path, "r") as f:
+        app.state.config = json.load(f)
+    logging.info("Config loaded successfully.")
+    yield
+    logging.info("Shutting down FastAPI app...")
+
+
+# FastAPI app
+app = FastAPI(title="HackRx PDF RAG API", version="1.0.0", lifespan=lifespan)
+
+@app.post("/api/v1/hackrx/run", response_model=AnswerResponse)
+async def process_questions(request: QuestionRequest, api_key: str = Depends(verify_api_key)):
+    try:
+        url = str(request.documents)
+        config = app.state.config
+        questions = request.questions
+
+        logging.info(f"Received {len(questions)} questions for processing. Documents URL: {url}")
+
+        # Create cache directory if not exists
+        cache_dir = "cache"
+        os.makedirs(cache_dir, exist_ok=True)
+        # Create a cache key from url and questions
+        cache_key = hashlib.sha256((url + json.dumps(questions, sort_keys=True)).encode()).hexdigest()
+        cache_file = os.path.join(cache_dir, f"{cache_key}.json")
+
+        # Try to load from cache
+        if os.path.exists(cache_file):
+            logging.info(f"Cache hit for key: {cache_key}")
+            with open(cache_file, "r") as f:
+                cached_response = json.load(f)
+            return cached_response
+
+        # Otherwise, call LLM and cache response
+        response, status_code = await llm_response_generator(config=config, url=url, questions=questions)
+        if status_code != status.HTTP_200_OK:
+            raise HTTPException(status_code=status_code, detail="Error processing questions")
         
-        choice = input("\nEnter your choice (1-3): ").strip()
-        
-        if choice == "1":
-            pdf_path = input("📄 Enter PDF file path: ").strip().strip('"')
-            if os.path.exists(pdf_path):
-                result = pipeline.process_pdf(pdf_path)
-                if "error" in result:
-                    print(f"❌ Error: {result['error']}")
-                else:
-                    print("\n✅ PDF processed successfully!")
-                    print(f"📊 Pages: {result['pages']}")
-                    print(f"📊 Chunks: {result['chunks']}")
-                    print(f"📊 Embeddings: {result['embeddings_shape']}")
-            else:
-                print("❌ File not found. Please check the path.")
-                
-        elif choice == "2":
-            question = input("❓ Ask your question: ").strip()
-            if question:
-                result = pipeline.query_document(question)
-                if "error" in result:
-                    print(f"❌ Error: {result['error']}")
-                else:
-                    print(f"\n🤖 Answer: {result['answer']}")
-                    print(f"📖 Sources from pages: {result['source_pages']}")
-            else:
-                print("❌ Please enter a question.")
-                
-        elif choice == "3":
-            print("👋 Goodbye!")
-            break
-            
         else:
-            print("❌ Invalid choice. Please try again.")
+            with open(cache_file, "w") as f:
+                json.dump(response, f)
+            logging.info(f"Cache saved for key: {cache_key}")
+            return response
+
+    except Exception as e:
+        logging.error(f"Error processing questions: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint to verify API is running
+    """
+    return {"status": "Healthy", "message": "API is running smoothly.", "code": status.HTTP_200_OK}
 
 if __name__ == "__main__":
-    main()
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        workers=1
+    )
