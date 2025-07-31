@@ -75,6 +75,7 @@ async def process_questions(
         elapsed_time = time.time() - start_time
         logging.info(f"✅ Completed in {elapsed_time:.2f} seconds")
         return AnswerResponse(answers=answers)
+    
     except HTTPException:
         raise
     except Exception as e:

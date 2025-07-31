@@ -8,30 +8,31 @@ from app.utils.embedder import model, generate_embeddings, generate_openai_embed
 from app.core import INSURANCE_SYSTEM_PROMPT , GENERAL_SYSTEM_PROMPT
 
 class PDFRAGPipeline:
-    def __init__(self):
+    def __init__(self, config):
         self.setup_groq()
-        self.vector_store_path = "vector_store"
+        self.config = config
+
         self.processed_links = set()
-        # Populate set from existing .pkl files
-        for fname in os.listdir(EMBEDDINGS_DIR):
-            if fname.endswith('.pkl'):
-                # Reverse sanitize to get file link if needed, or just store sanitized names
-                self.processed_links.add(fname[:-4])
+        self.vector_store_path = "vector_store"
 
     def setup_groq(self):
-        """Configure Groq API with efficient settings"""
+        """
+        Configure Groq API
+        """
         try:
-            # Use environment variable for API key
-            groq_api_key = os.getenv("GROQ_API_KEY", "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")
-            self.groq_client = AsyncGroq(api_key=groq_api_key)
-            self.model_name = "llama-3.3-70b-versatile"  # Most efficient model gemma qwen mistral
-            logging.info("✅ Groq API configured successfully")
+
+            groq_api_key = self.config.get("GROQ_KEY")
+            self.groq_client = AsyncGroq(api_key=groq_api_key, model=self.config.get("MODEL_NAME"))
+            logging.info("Groq API configured successfully")
+        
         except Exception as e:
-            logging.error(f"❌ Failed to configure Groq: {e}")
+            logging.error(f"Failed to configure Groq: {e}")
             raise
 
     async def download_pdf(self, url: str) -> bytes:
-        """Download PDF from URL (unchanged)"""
+        """
+        Download PDF from URL (unchanged)
+        """
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url) as response:
@@ -42,6 +43,7 @@ class PDFRAGPipeline:
                             status_code=400,
                             detail=f"Failed to download PDF: HTTP {response.status}"
                         )
+        
         except Exception as e:
             raise HTTPException(
                 status_code=400,
@@ -52,7 +54,7 @@ class PDFRAGPipeline:
         """Process PDF content through the pipeline (optimized)."""
         try:
             sanitized = sanitize_filename(file_link) if file_link else None
-            pkl_path = os.path.join(EMBEDDINGS_DIR, f"{sanitized}.pkl") if sanitized else None
+            pkl_path = os.path.join(EMBEDDI2NGS_DIR, f"{sanitized}.pkl") if sanitized else None
             # Save PDF temporarily
             temp_pdf_path = "temp_document.pdf"
             with open(temp_pdf_path, "wb") as f:

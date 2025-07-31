@@ -1,4 +1,6 @@
 {
   "EMBEDDINGS_DIR": "embeddings",
+  "MODEL_NAME": "llama-3.3-70b-versatile",
+  "GROQ_KEY": "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",
   "VALID_API_KEY": "2931609bd36ec1a45cb577b3b831dc711c76ae157b3c6250c564284c93b062ff"
 }
