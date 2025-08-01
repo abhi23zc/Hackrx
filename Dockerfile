@@ -13,7 +13,9 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p cache database/faiss_index
+RUN mkdir -p cache database/faiss_index && \
+    chmod -R 777 /app/cache/transformers && \
+    find /app/cache/transformers -name '*.lock' -delete || true
 
 # Expose FastAPI port
 EXPOSE 8000
