@@ -1,3 +1,22 @@
+
+---
+title: Hackrx PDF RAG API
+emoji: 📄
+colorFrom: green
+colorTo: blue
+sdk: docker
+sdk_version: "3.13.3"
+app_file: main.py
+pinned: true
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+
+## 📦 Project Info
+
+- **Project Name:** Hackrx
+- **Python Version:** 3.13.3
+
 # 🚀 HackRx PDF RAG API
 
 A production-ready FastAPI service that processes PDF documents and answers questions using Retrieval-Augmented Generation (RAG) with Google's Gemini AI.

@@ -22,8 +22,6 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 # Production stage
 FROM python:3.11-bookworm as production
 
-# Create non-root user for security
-RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 # Install only necessary runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -42,14 +40,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY . .
 
-# Create necessary directories and set permissions
-RUN mkdir -p database/faiss_index cache/transformers cache/huggingface cache/datasets vector_store temp_vector_store && \
-    mkdir -p /home/appuser/.cache/huggingface && \
-    chown -R appuser:appuser /app && \
-    chown -R appuser:appuser /home/appuser
-
-# Switch to non-root user
-USER appuser
+# Create necessary directories
+RUN mkdir -p database/faiss_index cache/transformers cache/huggingface cache/datasets vector_store temp_vector_store
 
 # Expose port
 EXPOSE 8000
