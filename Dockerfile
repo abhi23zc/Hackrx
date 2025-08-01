@@ -43,8 +43,10 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY . .
 
 # Create necessary directories and set permissions
-RUN mkdir -p database/faiss_index cache vector_store temp_vector_store && \
-    chown -R appuser:appuser /app
+RUN mkdir -p database/faiss_index cache/transformers cache/huggingface cache/datasets vector_store temp_vector_store && \
+    mkdir -p /home/appuser/.cache/huggingface && \
+    chown -R appuser:appuser /app && \
+    chown -R appuser:appuser /home/appuser
 
 # Switch to non-root user
 USER appuser
@@ -60,7 +62,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    GROQ_API_KEY=""
+    TRANSFORMERS_CACHE=/app/cache/transformers \
+    HF_HOME=/app/cache/huggingface \
+    HF_DATASETS_CACHE=/app/cache/datasets
 
 # Run the application
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

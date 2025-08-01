@@ -78,7 +78,7 @@ async def llm_setup(config, url):
     llm = ChatGroq(
         model=f"{config.get('MODEL_NAME')}",
         temperature=f"{config.get('TEMPERATURE', 0)}",
-        max_tokens=f"{config.get('MAX_TOKENS', 500)}",  # Increased token limit for JSON responses
+        max_tokens=f"{config.get('MAX_TOKENS', 300)}",  # Increased token limit for JSON responses
         max_retries=f"{config.get('MAX_RETRIES', 3)}",
         api_key=f"{config.get('GROQ_KEY')}",
     )
