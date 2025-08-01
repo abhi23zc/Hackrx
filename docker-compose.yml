@@ -11,8 +11,9 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - PYTHONPATH=/app
     volumes:
-      - ./vector_store:/app/vector_store
       - ./logs:/app/logs
+      - ./database:/app/database
+      - ./cache:/app/cache
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

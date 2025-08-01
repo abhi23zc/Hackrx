@@ -13,7 +13,7 @@
       "If the police torture someone in custody, what right is being violated?",
       "If I'm denied admission to a public university because I'm from a backward community, can I do something?"
     ]
-  }, -> 3
+  },
 
   {
     "documents": "https://hackrx.blob.core.windows.net/assets/indian_constitution.pdf?sv=2023-01-03&st=2025-07-28T06%3A42%3A00Z&se=2026-11-29T06%3A42%3A00Z&sr=b&sp=r&sig=5Gs%2FOXqP3zY00lgciu4BZjDV5QjTDIx7fgnfdz6Pu24%3D",
@@ -27,7 +27,7 @@
       "Article 15 prohibits discrimination on certain grounds. However, which groups can the State make special provisions for under this Article?",
       "Which Article allows Parliament to regulate the right of citizenship and override previous articles on citizenship (Articles 5 to 10)?",
       "What restrictions can the State impose on the right to freedom of speech under Article 19(2)?"
-    ] -> 4
+    ]
   },
 
   {
@@ -72,6 +72,6 @@
       "How does the policy define a 'Hospital'?",
       "What is the extent of coverage for AYUSH treatments?",
       "Are there any sub-limits on room rent and ICU charges for Plan A?"
-    ] -> 6
+    ]
   }
 ]

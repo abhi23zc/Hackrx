@@ -45,18 +45,22 @@ async def load_and_create_vector_store(url: str):
         
         full_text = "\n\n".join([page.page_content for page in pages])
         documents = [Document(page_content=full_text, metadata={"source": url})]
-        # Use CharacterTextSplitter for chunking
+        # Use CharacterTextSplitter with optimized parameters for better chunk quality
         text_splitter = CharacterTextSplitter(
             separator="\n\n",
             chunk_size=2500,
             chunk_overlap=300,
+            length_function=len,
         )
         split_docs = text_splitter.split_documents(documents)
+        logging.info(f"Document split into {len(split_docs)} chunks")
 
         vectorstore = FAISS.from_documents(split_docs, embeddings)
         vectorstore.save_local(vectorstore_path)
 
-    return vectorstore.as_retriever(search_kwargs={"k": 1})
+    return vectorstore.as_retriever(
+        search_kwargs={"k": 2, "score_threshold": 0.5}
+    )
 
 async def llm_setup(config, url):
     """
@@ -65,18 +69,22 @@ async def llm_setup(config, url):
     This function initializes the LLM with the necessary configurations
     for processing questions and generating answers based on the context.
     
+    Args:
+        config: Configuration dictionary with LLM settings
+        url: URL of the document to process
     Returns:
         object: The configured LLM instance.
     """
     llm = ChatGroq(
         model=f"{config.get('MODEL_NAME')}",
         temperature=f"{config.get('TEMPERATURE', 0)}",
-        max_tokens=f"{config.get('MAX_TOKENS', 300)}",
+        max_tokens=f"{config.get('MAX_TOKENS', 500)}",  # Increased token limit for JSON responses
         max_retries=f"{config.get('MAX_RETRIES', 3)}",
         api_key=f"{config.get('GROQ_KEY')}",
     )
     logging.info(f"LLM initialized with model: {config.get('MODEL_NAME')}, api_key: {config.get('GROQ_KEY')}")
 
+    # Choose template based on whether we need structured JSON output
     prompt_template = prompt_template_description()
 
     retriever = await load_and_create_vector_store(url=url)
@@ -92,6 +100,15 @@ async def llm_setup(config, url):
 async def llm_response_generator(config, url, questions):
     """
     Generate answers from the LLM within 30 seconds.
+    
+    Args:
+        config: Configuration dictionary with LLM settings
+        url: URL of the document to process
+        questions: List of questions to answer
+        use_json: Whether to force JSON output format
+        
+    Returns:
+        Tuple of (response dict, status code)
     """
     try:
         start = time.time()
@@ -107,6 +124,7 @@ async def llm_response_generator(config, url, questions):
             try:
                 answer = await qa_chain.arun(question)
                 answers.append(answer)
+            
             except Exception as e:
                 logging.error(f"Error answering: {question} | {e}")
                 answers.append("Error processing question.")

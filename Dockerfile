@@ -1,22 +1,16 @@
 # Multi-stage build for optimization
-FROM python:3.11-slim as builder
+FROM python:3.11-bookworm as builder
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies for PDF processing and scientific computing
+# Install minimal system dependencies for scientific computing
 RUN apt-get update && apt-get install -y \
     build-essential \
-    curl \
-    libssl-dev \
-    libffi-dev \
-    python3-dev \
     pkg-config \
     libhdf5-dev \
     libopenblas-dev \
-    liblapack-dev \
-    gfortran \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .
@@ -26,19 +20,17 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
 # Production stage
-FROM python:3.11-slim as production
+FROM python:3.11-bookworm as production
 
 # Create non-root user for security
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
+# Install only necessary runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     libopenblas0 \
-    liblapack3 \
     libhdf5-103 \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -50,8 +42,8 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p vector_store temp_vector_store && \
+# Create necessary directories and set permissions
+RUN mkdir -p database/faiss_index cache vector_store temp_vector_store && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user
@@ -71,4 +63,4 @@ ENV PYTHONPATH=/app \
     GROQ_API_KEY=""
 
 # Run the application
-CMD ["uvicorn", "fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
