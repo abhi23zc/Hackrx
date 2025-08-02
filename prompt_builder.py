@@ -48,42 +48,29 @@ def build_prompt_with_sources(query, context_chunks, max_chars=4000):
     return prompt, used_sources
 
 
-def build_prompt_without_sources(query, context_chunks, max_chars=6000):
+def build_prompt_without_sources(query, context_chunks):
     """
     Builds a clean prompt WITHOUT citations for Gemini.
 
     Args:
         query (str): User's question
-        context_chunks (list): List of dicts with 'text'
-        max_chars (int): Max total character limit
+        context_chunks (list): List of dicts with 'text' and 'score' (similarity score)
 
     Returns:
         str: Final prompt for LLM
     """
-    intro = (
-        "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\n"
-        "CRITICAL RULES:\n"
-        "- Answer exactly what is asked with the most important details only\n"
-        "- Include specific numbers, time periods, and key conditions\n"
-        "- Keep answers to 1-2 sentences maximum\n"
-        "- Use clear, professional language\n"
-        "- Focus on the core information requested\n"
-        "- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\n"
-        "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question.\n\n"
-    )
+    intro = ""
 
-    context_header = "### Context:\n"
-    prompt_header = "\n### Question:\n"
+    context_header = "Context:\n"
+    prompt_header = "\nQuestion:\n"
 
     context_str = ""
-    total_chars = 0
     for chunk in context_chunks:
         text = chunk["text"].strip().replace("\n", " ")
-        block = f"{text}\n\n"
-        if total_chars + len(block) > max_chars:
-            break
+        # Include similarity score with each chunk
+        score = chunk.get("score", 0.0)
+        block = f"[Score: {score:.4f}] {text}\n\n"
         context_str += block
-        total_chars += len(block)
 
     return intro + context_header + context_str + prompt_header + query.strip()
 

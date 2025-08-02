@@ -7,7 +7,6 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, HttpUrl
 import logging
 import time
-from groq import AsyncGroq
 import pickle
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyMuPDFLoader
@@ -67,6 +66,8 @@ def hash_filelink(filelink: str) -> str:
 INSURANCE_SYSTEM_PROMPT = (
     "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\n"
     "CRITICAL RULES:\n"
+    "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
+    "- If the highest similarity score is < 0.45, respond with: \"Information not available in the provided document.\"\n"
     "- Answer exactly what is asked with the most important details only\n"
     "- Include specific numbers, time periods, and key conditions\n"
     "- Keep answers to 1-2 sentences maximum\n"
@@ -76,23 +77,25 @@ INSURANCE_SYSTEM_PROMPT = (
     "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question."
 )
 
+
 GENERAL_SYSTEM_PROMPT = (
-    "You are a specialized AI assistant designed to provide precise, factual answers based strictly on the context of the provided document. "
-    "These documents may include insurance policies, legal contracts, HR manuals, compliance guidelines, technical manuals, brochures, academic materials, or other large, unstructured texts.\n\n"
+    "You are a HUMAN subject matter expert based strictly on the context of the provided document.\n"
+    "These documents may include anything.\n\n"
     "CRITICAL RULES:\n"
-    "- Answer exactly what is asked with the most important details only\n"
-    "- Include specific numbers, time periods, names, or key conditions when relevant\n"
-    "- Keep answers to 1-2 sentences maximum\n"
-    "- Use clear, professional language\n"
-    "- Focus on the core information requested\n"
-    "- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\n"
-    "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential details from the document that directly answer the question."
+    "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
+    "- Higher similarity scores indicate more relevant information.\n"
+    "- If after using the chunks and all analysis you can't find relevant information, use your own capabilities to answer, but first write: \"Couldn't find relevant information in the document but here's an answer.\" Then provide your answer.\n"
+    "- Use clear, professional language.\n"
+    "- Focus on the core information requested.\n"
+    "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only essential details."
 )
 
 # QWEN-style system prompt for concise, direct, factual answers (no thinking steps, no context explanation)
 QWEN_SYSTEM_PROMPT = (
     "You are a highly knowledgeable assistant. Answer ONLY with the direct, factual answer to the user's question, based strictly on the provided document context.\n\n"
     "RULES:\n"
+    "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
+    "- If the highest similarity score is < 0.45, reply exactly: 'Information not available in the provided document.'\n"
     "- Do NOT include any reasoning, thinking steps, or explanations.\n"
     "- Do NOT mention the context, pages, or your process.\n"
     "- Do NOT use phrases like 'Based on the document' or 'Looking at the context'.\n"
@@ -126,15 +129,20 @@ class PDFRAGPipeline:
                 self.processed_hashes.add(fname[:-4])
 
     def setup_groq(self):
-        """Configure Groq API with efficient settings"""
+        """Configure OpenRouter API with Groq Llama3-70B-instruct"""
         try:
-            # Use environment variable for API key
-            groq_api_key = os.getenv("GROQ_API_KEY", "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")
-            self.groq_client = AsyncGroq(api_key=groq_api_key)
-            self.model_name = "llama3-70b-8192"  # Use Llama 3 70B for Groq
-            logger.info("✅ Groq API configured successfully")
+            # Use hardcoded OpenRouter API key
+            openrouter_api_key = "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"
+            self.openrouter_llm = ChatOpenAI(
+                model="meta-llama/llama-3.3-70b-instruct",
+                openai_api_key=openrouter_api_key,
+                openai_api_base="https://openrouter.ai/api/v1",
+                temperature=0.0,
+                max_tokens=1024
+            )
+            logger.info("✅ OpenRouter API configured successfully with Groq Llama3-70B-instruct")
         except Exception as e:
-            logger.error(f"❌ Failed to configure Groq: {e}")
+            logger.error(f"❌ Failed to configure OpenRouter: {e}")
             raise
 
     def setup_openai(self):
@@ -194,7 +202,7 @@ class PDFRAGPipeline:
             with open(temp_pdf_path, "wb") as f:
                 f.write(pdf_content)
             logger.info("🔍 Extracting PDF content...")
-            pdf_data = extract_pdf_content(temp_pdf_path)
+            pdf_data = await extract_pdf_content(temp_pdf_path)
             logger.info(f"✅ Extracted {len(pdf_data['pages'])} pages")
             logger.info("✂️ Chunking text...")
             chunks = chunk_text(pdf_data["pages"])
@@ -274,9 +282,17 @@ class PDFRAGPipeline:
             logger.info("📦 Chunks sent with prompt:")
             for i, chunk in enumerate(reranked):
                 logger.info(f"Chunk {i}: {chunk}")
-            # Step 3: Build optimized prompt
+            # Step 3: Build optimized prompt with similarity scores
             prompt = build_prompt_without_sources(question, reranked)
             system_prompt = GENERAL_SYSTEM_PROMPT
+            
+            # Log the complete prompt being sent to LLM
+            logger.info("🤖 FINAL PROMPT BEING SENT TO LLM:")
+            logger.info("=" * 80)
+            logger.info(f"System Prompt: {system_prompt}")
+            logger.info("-" * 80)
+            logger.info(f"User Prompt: {prompt}")
+            logger.info("=" * 80)
             # Step 4: Get answer from the selected LLM
             max_retries = 5
             for attempt in range(max_retries):
@@ -297,18 +313,20 @@ class PDFRAGPipeline:
                         ])
                         answer = response.content.strip()
                     else:
-                        response = await self.groq_client.chat.completions.create(
-                            model=self.model_name,
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": prompt}
-                            ],
-                            max_tokens=1024,
-                            temperature=0.1,
-                            top_p=0.9,
-                            stream=False
-                        )
-                        answer = response.choices[0].message.content.strip()
+                        response = await self.openrouter_llm.ainvoke([
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt}
+                        ])
+                        # Log the full response object to see headers and metadata
+                        logger.info(f"🔍 Full LLM Response Object: {response}")
+                        logger.info(f"🔍 Response Type: {type(response)}")
+                        logger.info(f"🔍 Response Attributes: {dir(response)}")
+                        if hasattr(response, 'response_metadata'):
+                            logger.info(f"🔍 Response Metadata: {response.response_metadata}")
+                        if hasattr(response, 'llm_output'):
+                            logger.info(f"🔍 LLM Output: {response.llm_output}")
+                        answer = response.content.strip()
+                        logger.info(f"🔍 Extracted Answer: {answer}")
                     logger.info("✅ Generated answer for question")
                     return answer
                 except Exception as e:

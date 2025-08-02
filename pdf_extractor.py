@@ -1,21 +1,24 @@
 from langchain_community.document_loaders import (
-    PyMuPDFLoader,
+    PyPDFLoader,
     Docx2txtLoader,
     UnstructuredEmailLoader
 )
 import os
+import asyncio
 
 
-def extract_pdf_content(file_path: str):
+async def extract_pdf_content(file_path: str):
     """
     Extracts text content from PDF, DOCX, or Email files using LangChain loaders.
     Returns a list of dicts with 'page' (or 'part') and 'text'.
     """
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".pdf":
-        loader = PyMuPDFLoader(file_path)
-        docs = loader.load()
-        return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(docs)]}
+        pages = []
+        loader = PyPDFLoader(file_path)
+        async for page in loader.alazy_load():
+            pages.append(page)
+        return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(pages)]}
     elif ext == ".docx":
         loader = Docx2txtLoader(file_path)
         docs = loader.load()
