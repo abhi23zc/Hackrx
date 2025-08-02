@@ -131,8 +131,12 @@ class PDFRAGPipeline:
     def setup_groq(self):
         """Configure OpenRouter API with Groq Llama3-70B-instruct"""
         try:
-            # Use hardcoded OpenRouter API key
-            openrouter_api_key = "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"
+            # Get OpenRouter API key from environment
+            openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+            if not openrouter_api_key:
+                logger.error("OPENROUTER_API_KEY not set in environment. Groq LLM will not work.")
+                raise ValueError("OPENROUTER_API_KEY environment variable is required")
+            
             self.openrouter_llm = ChatOpenAI(
                 model="meta-llama/llama-3.3-70b-instruct",
                 openai_api_key=openrouter_api_key,
