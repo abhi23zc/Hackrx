@@ -19,45 +19,24 @@ reranker_tokenizer = AutoTokenizer.from_pretrained(reranker_model_name)
 reranker_model = AutoModelForSequenceClassification.from_pretrained(reranker_model_name).to(device)
 
 
-def load_index_and_metadata(index_path: str = "vector_store/index.faiss",
-                            meta_path: str = "vector_store/metadata.json"):
-    """
-    Load FAISS index and associated metadata.
-
-    Returns:
-        FAISS index and metadata list
-    """
+def load_index_and_metadata(index_path, meta_path):
     if not os.path.exists(index_path) or not os.path.exists(meta_path):
         raise FileNotFoundError("Index or metadata file not found.")
-    
     index = faiss.read_index(index_path)
     with open(meta_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
-    
     return index, metadata
 
 
-def retrieve_top_k(query: str, k: int = 5) -> List[Dict]:
-    """
-    Retrieve top-K similar chunks from FAISS index using dense embedding.
-
-    Args:
-        query: Input user query
-        k: Number of top results to retrieve
-
-    Returns:
-        List of chunk metadata with similarity scores
-    """
+def retrieve_top_k(query: str, k: int, index_path: str, meta_path: str) -> List[Dict]:
     query_emb = embed_model.encode(["query: " + query], convert_to_numpy=True)
     faiss.normalize_L2(query_emb)
-
-    index, metadata = load_index_and_metadata()
+    index, metadata = load_index_and_metadata(index_path, meta_path)
     distances, indices = index.search(query_emb, k)
-
     results = []
     for rank, i in enumerate(indices[0]):
         if i >= len(metadata):
-            continue  # Avoid index errors
+            continue
         meta = metadata[i]
         results.append({
             "text": meta.get("text", ""),
@@ -65,7 +44,6 @@ def retrieve_top_k(query: str, k: int = 5) -> List[Dict]:
             "chunk_index": meta.get("chunk_index", i),
             "score": float(distances[0][rank])
         })
-
     return results
 
 
