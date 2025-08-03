@@ -19,6 +19,10 @@ from retriever_reranker import retrieve_top_k, rerank_chunks
 from prompt_builder import build_prompt_without_sources
 import hashlib
 import numpy as np
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Remove Google imports
 # import google.generativeai as genai
@@ -63,56 +67,23 @@ def hash_filelink(filelink: str) -> str:
 
 
 # System prompts
-INSURANCE_SYSTEM_PROMPT = (
-    "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\n"
-    "CRITICAL RULES:\n"
-    "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
-    "- If the highest similarity score is < 0.45, respond with: \"Information not available in the provided document.\"\n"
-    "- Answer exactly what is asked with the most important details only\n"
-    "- Include specific numbers, time periods, and key conditions\n"
-    "- Keep answers to 1-2 sentences maximum\n"
-    "- Use clear, professional language\n"
-    "- Focus on the core information requested\n"
-    "- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\n"
-    "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question."
-)
-
 
 GENERAL_SYSTEM_PROMPT = (
     "You are a HUMAN subject matter expert based strictly on the context of the provided document.\n"
     "These documents may include anything.\n\n"
     "CRITICAL RULES:\n"
     "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
-    "- Higher similarity scores indicate more relevant information.\n"
-    "- If after using the chunks and all analysis you can't find relevant information, use your own capabilities to answer, but first write: \"Couldn't find relevant information in the document but here's an answer.\" Then provide your answer.\n"
+    "- Higher simsilarity scores indicate more relevant information.\n"
+    "- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return \"Question out of scope of the document\"\n"
+    "- If after using the chunks and all analysis you can't find relevant information even with SCORE of all chunks more than 0.2,use general knowledge readily available on the net to answer the query imitating paraphrasing of the document.\n"
+    " -After forming your answer if the query was a straight confirmational question, reframe the answer giving confirmation by the at max 2-3 facts in a precis fashion.\n"
     "- Use clear, professional language.\n"
     "- Focus on the core information requested.\n"
     "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only essential details."
-)
+) 
 
-# QWEN-style system prompt for concise, direct, factual answers (no thinking steps, no context explanation)
-QWEN_SYSTEM_PROMPT = (
-    "You are a highly knowledgeable assistant. Answer ONLY with the direct, factual answer to the user's question, based strictly on the provided document context.\n\n"
-    "RULES:\n"
-    "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
-    "- If the highest similarity score is < 0.45, reply exactly: 'Information not available in the provided document.'\n"
-    "- Do NOT include any reasoning, thinking steps, or explanations.\n"
-    "- Do NOT mention the context, pages, or your process.\n"
-    "- Do NOT use phrases like 'Based on the document' or 'Looking at the context'.\n"
-    "- If the answer is not found in the document, reply exactly: 'Information not available in the provided document.'\n"
-    "- Use clear, concise, and professional language.\n"
-    "- Include specific numbers, time periods, and key conditions if present.\n"
-    "- Keep answers to 1-2 sentences, as in a summary.\n"
-    "- Do NOT include any <think> or meta-cognitive steps.\n"
-    "- Respond ONLY with the answer text.\n\n"
-    "EXAMPLES:\n"
-    "Q: What is the grace period for premium payment under the National Parivar Mediclaim Plus Policy?\n"
-    "A: A grace period of thirty days is provided for premium payment after the due date to renew or continue the policy without losing continuity benefits.\n\n"
-    "Q: Does this policy cover maternity expenses, and what are the conditions?\n"
-    "A: Yes, the policy covers maternity expenses, including childbirth and lawful medical termination of pregnancy. To be eligible, the female insured person must have been continuously covered for at least 24 months. The benefit is limited to two deliveries or terminations during the policy period.\n"
-)
 
-# Remove token limit and estimation
+
 
 class PDFRAGPipeline:
     def __init__(self):
@@ -141,7 +112,7 @@ class PDFRAGPipeline:
                 model="meta-llama/llama-3.3-70b-instruct",
                 openai_api_key=openrouter_api_key,
                 openai_api_base="https://openrouter.ai/api/v1",
-                temperature=0.0,
+                temperature=0.1,
                 max_tokens=1024
             )
             logger.info("✅ OpenRouter API configured successfully with Groq Llama3-70B-instruct")
@@ -166,26 +137,10 @@ class PDFRAGPipeline:
             logger.error(f"❌ Failed to configure OpenAI: {e}")
             raise
 
-    async def download_pdf(self, url: str) -> bytes:
-        """Download PDF from URL (unchanged)"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        return await response.read()
-                    else:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Failed to download PDF: HTTP {response.status}"
-                        )
-        except Exception as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Error downloading PDF: {str(e)}"
-            )
 
-    async def process_pdf(self, pdf_content: bytes, file_link: str = None) -> dict:
-        """Process PDF content through the pipeline (optimized)."""
+
+    async def process_pdf(self, file_link: str) -> dict:
+        """Process PDF content through the pipeline (URL only)."""
         try:
             file_hash = hash_filelink(file_link)
             pkl_path = os.path.join(self.embeddings_dir, f"{file_hash}.pkl")
@@ -201,12 +156,18 @@ class PDFRAGPipeline:
                     create_faiss_index(np.array(result["embeddings"]), index_path=index_path)
                     save_metadata(result["chunks"], meta_path=meta_path)
                 return result
-            # Not cached: process as usual
-            temp_pdf_path = "temp_document.pdf"
-            with open(temp_pdf_path, "wb") as f:
-                f.write(pdf_content)
-            logger.info("🔍 Extracting PDF content...")
-            pdf_data = await extract_pdf_content(temp_pdf_path)
+            
+            # Not cached: process using URL directly
+            logger.info("🔍 Extracting PDF content directly from URL...")
+            logger.info(f"📄 URL being processed: {file_link}")
+            try:
+                pdf_data = await extract_pdf_content(file_link)
+                logger.info("✅ PDF extraction completed successfully")
+            except Exception as e:
+                logger.error(f"❌ PDF extraction failed: {str(e)}")
+                logger.error(f"❌ Error type: {type(e)}")
+                raise
+            
             logger.info(f"✅ Extracted {len(pdf_data['pages'])} pages")
             logger.info("✂️ Chunking text...")
             chunks = chunk_text(pdf_data["pages"])
@@ -225,7 +186,6 @@ class PDFRAGPipeline:
                 meta_path=meta_path
             )
             logger.info("✅ Vector store created successfully")
-            os.remove(temp_pdf_path)
             result = {
                 "success": True,
                 "chunks": chunks,
@@ -247,18 +207,42 @@ class PDFRAGPipeline:
                 detail=f"Error processing PDF: {str(e)}"
             )
 
-    async def answer_questions(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None) -> List[str]:
-        """Answer questions using the selected LLM provider with a 1s gap between each call."""
+    async def answer_questions(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None, request_start_time: float = None) -> List[str]:
+        """Answer questions using the selected LLM provider with robust timeout mechanism."""
         try:
-            answers = []
+            # Initialize answers array with empty strings to match questions length
+            answers = [""] * len(questions)
+            # Use request start time if provided, otherwise use current time
+            start_time = request_start_time if request_start_time is not None else time.time()
+            timeout_threshold = 29.0  # 29 seconds threshold
+            
+            # Calculate remaining time
+            elapsed_time = time.time() - start_time
+            remaining_time = max(0, timeout_threshold - elapsed_time)
+            
+            if remaining_time <= 0:
+                logger.info(f"⏰ No time remaining ({elapsed_time:.2f}s elapsed). Returning empty answers.")
+                return answers
+            
+            # Process questions concurrently with robust timeout
             tasks = []
             for i, question in enumerate(questions):
-                # Stagger each call by 1 second
-                async def delayed_call(q=question, delay=i):
-                    await asyncio.sleep(delay)
-                    return await self._process_single_question(q, llm_provider=llm_provider, file_hash=file_hash)
-                tasks.append(delayed_call())
-            answers = await asyncio.gather(*tasks)
+                task = asyncio.create_task(self._process_single_question_with_index(i, question, llm_provider, file_hash, answers, start_time, timeout_threshold))
+                tasks.append(task)
+            
+            # Use asyncio.wait_for with timeout to actually interrupt tasks
+            try:
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=remaining_time)
+                logger.info("✅ All questions processed within time limit")
+            except asyncio.TimeoutError:
+                logger.warning(f"⏰ Timeout reached ({timeout_threshold:.2f}s). Cancelling remaining tasks.")
+                # Cancel any remaining tasks
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                # Wait a bit for cancellations to take effect
+                await asyncio.sleep(0.1)
+            
             return answers
         except Exception as e:
             raise HTTPException(
@@ -266,45 +250,74 @@ class PDFRAGPipeline:
                 detail=f"Error answering questions: {str(e)}"
             )
 
-    async def _process_single_question(self, question: str, llm_provider: str = "groq", file_hash: str = None) -> str:
+    async def _process_single_question_with_index(self, index: int, question: str, llm_provider: str, file_hash: str, answers: List[str], start_time: float, timeout_threshold: float):
+        """Process a single question and update the answers list at the specified index."""
         try:
-            logger.info(f"🔍 Processing question: {question} (LLM: {llm_provider})")
+            # Check if we're approaching the timeout
+            elapsed_time = time.time() - start_time
+            if elapsed_time >= timeout_threshold:
+                logger.info(f"⏰ Timeout threshold reached ({elapsed_time:.2f}s). Skipping question {index + 1}")
+                answers[index] = "Skipping question adhering to 30s response time limits"
+                return
+            
+            logger.info(f"🔍 Processing question {index + 1}: {question} (LLM: {llm_provider})")
+            
             # Step 1: Retrieve relevant chunks using hash-based paths
             index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
             meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
+            
             retrieved = retrieve_top_k(question, k=5, index_path=index_path, meta_path=meta_path)
-            logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks")
+            logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks for question {index + 1}")
+            
+            # Check for cancellation after retrieval
+            if asyncio.current_task().cancelled():
+                logger.info(f"🛑 Question {index + 1} cancelled after retrieval")
+                return
+            
             if not retrieved:
-                logger.error("No relevant chunks retrieved for question.")
-                return "Information not available in the provided document."
+                logger.error(f"No relevant chunks retrieved for question {index + 1}.")
+                answers[index] = "Information not available in the provided document."
+                return
+            
             # Step 2: Rerank chunks
             reranked = rerank_chunks(question, retrieved, top_n=3)
-            logger.info(f"✅ Reranked to top {len(reranked)} chunks")
+            logger.info(f"✅ Reranked to top {len(reranked)} chunks for question {index + 1}")
+            
+            # Check for cancellation after reranking
+            if asyncio.current_task().cancelled():
+                logger.info(f"🛑 Question {index + 1} cancelled after reranking")
+                return
+            
             if not reranked:
-                logger.error("No chunks after reranking.")
-                return "Information not available in the provided document."
-            logger.info("📦 Chunks sent with prompt:")
-            for i, chunk in enumerate(reranked):
-                logger.info(f"Chunk {i}: {chunk}")
+                logger.error(f"No chunks after reranking for question {index + 1}.")
+                answers[index] = "Information not available in the provided document."
+                return
+            
             # Step 3: Build optimized prompt with similarity scores
             prompt = build_prompt_without_sources(question, reranked)
             system_prompt = GENERAL_SYSTEM_PROMPT
             
-            # Log the complete prompt being sent to LLM
-            logger.info("🤖 FINAL PROMPT BEING SENT TO LLM:")
-            logger.info("=" * 80)
-            logger.info(f"System Prompt: {system_prompt}")
-            logger.info("-" * 80)
-            logger.info(f"User Prompt: {prompt}")
-            logger.info("=" * 80)
             # Step 4: Get answer from the selected LLM
-            max_retries = 5
+            max_retries = 3
             for attempt in range(max_retries):
                 try:
+                    # Check for cancellation before LLM call
+                    if asyncio.current_task().cancelled():
+                        logger.info(f"🛑 Question {index + 1} cancelled before LLM call")
+                        return
+                    
+                    # Check timeout before each attempt
+                    elapsed_time = time.time() - start_time
+                    if elapsed_time >= timeout_threshold:
+                        logger.info(f"⏰ Timeout threshold reached ({elapsed_time:.2f}s). Stopping question {index + 1}")
+                        answers[index] = "Skipping question adhering to 30s response time limits"
+                        return
+                    
                     if llm_provider == "openai":
                         if not self.openai_api_key:
                             logger.error("OPENAI_API_KEY not set. Cannot use OpenAI LLM.")
-                            return "OpenAI API key not configured."
+                            answers[index] = "OpenAI API key not configured."
+                            return
                         openai_llm = ChatOpenAI(
                             model="gpt-4o",
                             temperature=0.1,
@@ -321,30 +334,30 @@ class PDFRAGPipeline:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": prompt}
                         ])
-                        # Log the full response object to see headers and metadata
-                        logger.info(f"🔍 Full LLM Response Object: {response}")
-                        logger.info(f"🔍 Response Type: {type(response)}")
-                        logger.info(f"🔍 Response Attributes: {dir(response)}")
-                        if hasattr(response, 'response_metadata'):
-                            logger.info(f"🔍 Response Metadata: {response.response_metadata}")
-                        if hasattr(response, 'llm_output'):
-                            logger.info(f"🔍 LLM Output: {response.llm_output}")
                         answer = response.content.strip()
-                        logger.info(f"🔍 Extracted Answer: {answer}")
-                    logger.info("✅ Generated answer for question")
-                    return answer
+                    
+                    # Update the answers list at the correct index
+                    answers[index] = answer
+                    logger.info(f"✅ Generated answer for question {index + 1}")
+                    return
+                    
                 except Exception as e:
                     # Check for 429 error
                     if "429" in str(e) or "Too Many Requests" in str(e):
-                        wait_time = 2 ** attempt
-                        logger.warning(f"Rate limited by LLM API. Retrying in {wait_time} seconds...")
+                        wait_time = min(2 ** attempt, 5)  # Cap wait time at 5 seconds
+                        logger.warning(f"Rate limited by LLM API for question {index + 1}. Retrying in {wait_time} seconds...")
                         await asyncio.sleep(wait_time)
                     else:
-                        raise
-            return "Rate limit exceeded. Please try again later."
+                        logger.error(f"Error processing question {index + 1}: {str(e)}")
+                        answers[index] = "Unable to process this question at the moment."
+                        return
+            
+            # If we get here, all retries failed
+            answers[index] = "Unable to process this question at the moment."
+            
         except Exception as e:
-            logger.error(f"Error processing question: {repr(e)}", exc_info=True)
-            return f"I encountered an error answering this question: {str(e)}"
+            logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
+            answers[index] = "Unable to process this question at the moment."
 
 # Initialize pipeline
 pipeline = PDFRAGPipeline()
@@ -360,30 +373,44 @@ async def process_questions(
     - **documents**: URL to PDF document
     - **questions**: List of questions to answer
     """
-    start_time = time.time()
+    # Start timer immediately when request comes in
+    request_start_time = time.time()
+    logger.info(f"⏰ Request timer started at: {request_start_time}")
 
     try:
-        logger.info(f"📄 Downloading PDF from: {request.documents}")
+        logger.info(f"📄 Processing request for PDF: {request.documents}")
+        logger.info(f"📝 Questions to answer: {request.questions}")
+        
         file_hash = hash_filelink(str(request.documents))
+        logger.info(f"🔗 Generated file hash: {file_hash}")
+        
         pkl_path = os.path.join(pipeline.embeddings_dir, f"{file_hash}.pkl")
+        logger.info(f"📁 Checking cache at: {pkl_path}")
+        
         # Optimization: Check if hash is already processed before downloading
         if file_hash in pipeline.processed_hashes and os.path.exists(pkl_path):
             logger.info(f"⚡ Cache hit for document hash: {file_hash}. Using cached embeddings, skipping download and processing.")
             with open(pkl_path, "rb") as f:
                 process_result = pickle.load(f)
+            logger.info("✅ Loaded cached embeddings successfully")
         else:
-            pdf_content = await pipeline.download_pdf(str(request.documents))
-            logger.info("🔄 Processing PDF through pipeline...")
-            process_result = await pipeline.process_pdf(pdf_content, file_link=str(request.documents))
-        # Answer questions using Groq
-        logger.info("🤖 Answering questions with Groq...")
-        answers = await pipeline.answer_questions(request.questions, llm_provider="groq", file_hash=file_hash)
+            logger.info("🔄 Cache miss - Processing PDF through pipeline...")
+            process_result = await pipeline.process_pdf(file_link=str(request.documents))
+            logger.info("✅ PDF processing completed")
+        
+        # Answer questions using Groq with timer-based cutoff
+        logger.info("🤖 Answering questions with Groq (timer-based)...")
+        answers = await pipeline.answer_questions(request.questions, llm_provider="groq", file_hash=file_hash, request_start_time=request_start_time)
+        
         # Cleanup vector store
         import shutil
         if os.path.exists(pipeline.vector_store_path):
             shutil.rmtree(pipeline.vector_store_path)
-        elapsed_time = time.time() - start_time
-        logger.info(f"✅ Completed in {elapsed_time:.2f} seconds")
+        
+        total_elapsed_time = time.time() - request_start_time
+        logger.info(f"✅ Request completed in {total_elapsed_time:.2f} seconds")
+        logger.info(f"📊 Final answers count: {len(answers)} (expected: {len(request.questions)})")
+        
         return AnswerResponse(answers=answers)
     except HTTPException:
         raise

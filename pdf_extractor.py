@@ -3,32 +3,46 @@ from langchain_community.document_loaders import (
     Docx2txtLoader,
     UnstructuredEmailLoader
 )
-import os
 import asyncio
+import os
 
 
-async def extract_pdf_content(file_path: str):
+async def extract_pdf_content(url: str):
     """
-    Extracts text content from PDF, DOCX, or Email files using LangChain loaders.
+    Extracts text content from PDF, DOCX, or Email URLs using LangChain loaders.
     Returns a list of dicts with 'page' (or 'part') and 'text'.
     """
-    ext = os.path.splitext(file_path)[1].lower()
+    # Check file extension from URL - handle query parameters properly
+    from urllib.parse import urlparse
+    parsed_url = urlparse(url)
+    path = parsed_url.path
+    ext = os.path.splitext(path)[1].lower()
+    
     if ext == ".pdf":
+        # Use PyPDFLoader directly with URL
         pages = []
-        loader = PyPDFLoader(file_path)
+        loader = PyPDFLoader(url)
         async for page in loader.alazy_load():
             pages.append(page)
         return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(pages)]}
     elif ext == ".docx":
-        loader = Docx2txtLoader(file_path)
+        # For DOCX from URL, we'd need to download first or use different approach
+        # For now, assuming it's a local file path or we'll handle URL download
+        loader = Docx2txtLoader(url)
         docs = loader.load()
         return {"pages": [{"page": 1, "text": docs[0].page_content}]}
     elif ext in [".eml", ".msg"]:
-        loader = UnstructuredEmailLoader(file_path)
+        # For email files from URL
+        loader = UnstructuredEmailLoader(url)
         docs = loader.load()
         return {"pages": [{"part": i+1, "text": doc.page_content} for i, doc in enumerate(docs)]}
     else:
-        raise ValueError(f"Unsupported file type: {ext}")
+        # Default to PDF if no extension or unknown extension
+        pages = []
+        loader = PyPDFLoader(url)
+        async for page in loader.alazy_load():
+            pages.append(page)
+        return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(pages)]}
 
 # Example usage:
 # if __name__ == "__main__":
