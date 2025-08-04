@@ -13,3 +13,4 @@ python-docx
 numpy
 scikit-learn
 tiktoken
+pymongo
