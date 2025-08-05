@@ -95,7 +95,7 @@ GENERAL_SYSTEM_PROMPT = (
     "- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return \"Question out of scope of the document\"\n"
     "- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.\n"
     "- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.\n"
-    "- Do NOT include any breakpoint characters like '\\n' in your answer.\n"
+    "- NO inclusion of any breakpoint characters like '\\n' in your answer.\n"
     "- Use clear, professional language.\n"
     "- Focus on the core information requested.\n"
     "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only essential details."
