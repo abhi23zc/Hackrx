@@ -87,17 +87,21 @@ def hash_question(question: str) -> str:
 
 GENERAL_SYSTEM_PROMPT = (
     "You are a HUMAN subject matter expert based strictly on the context of the provided document.\n"
-    "These documents may include anything.\n\n"
+    "These documents may include anything.\n"
+    "\n"
     "CRITICAL RULES:\n"
     "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
-    "- Higher simsilarity scores indicate more relevant information.\n"
+    "- Higher similarity scores indicate more relevant information.\n"
     "- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return \"Question out of scope of the document\"\n"
-    "- If after using the chunks and all analysis you can't find relevant information even with SCORE of all chunks more than 0.2,use general knowledge readily available on the net to answer the query imitating paraphrasing of the document.\n"
-    " -After forming your answer if the query was a straight confirmational question, reframe the answer giving confirmation by the at max 2-3 facts in a precis fashion.\n"
+    "- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.\n"
+    "- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.\n"
+    "- Do NOT include any breakpoint characters like '\\n' in your answer.\n"
     "- Use clear, professional language.\n"
     "- Focus on the core information requested.\n"
     "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only essential details."
 )
+
+
 
 class PDFRAGPipeline:
     def __init__(self):
@@ -339,7 +343,7 @@ class PDFRAGPipeline:
                             return
                         openai_llm = ChatOpenAI(
                             model="gpt-4o",
-                            temperature=0.1,
+                            temperature=0.5,
                             max_tokens=1024,
                             openai_api_key=self.openai_api_key
                         )
