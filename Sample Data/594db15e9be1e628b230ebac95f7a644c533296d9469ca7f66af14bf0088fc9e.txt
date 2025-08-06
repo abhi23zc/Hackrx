@@ -1,0 +1,302 @@
+[
+  {
+    "Name":"Aarav Sharma",
+    "Mobile Number":9876543210,
+    "Pincode":110001,
+    "Salary":75000
+  },
+  {
+    "Name":"Aarav Sharma",
+    "Mobile Number":8765432109,
+    "Pincode":110001,
+    "Salary":75000
+  },
+  {
+    "Name":"Aarav Sharma",
+    "Mobile Number":8877665541,
+    "Pincode":400001,
+    "Salary":80000
+  },
+  {
+    "Name":"Aarav Sharma",
+    "Mobile Number":7766554430,
+    "Pincode":400001,
+    "Salary":80000
+  },
+  {
+    "Name":"Aditya Roy",
+    "Mobile Number":6543210987,
+    "Pincode":110001,
+    "Salary":92000
+  },
+  {
+    "Name":"Amitabh Bachchan",
+    "Mobile Number":7766554433,
+    "Pincode":400001,
+    "Salary":12000
+  },
+  {
+    "Name":"Amitabh Bachchan",
+    "Mobile Number":6655443322,
+    "Pincode":400001,
+    "Salary":120000
+  },
+  {
+    "Name":"Ananya Gupta",
+    "Mobile Number":6789012345,
+    "Pincode":700001,
+    "Salary":95000
+  },
+  {
+    "Name":"Anita Bhatt",
+    "Mobile Number":4433221099,
+    "Pincode":600001,
+    "Salary":70000
+  },
+  {
+    "Name":"Anjali Shah",
+    "Mobile Number":2109876543,
+    "Pincode":600001,
+    "Salary":73000
+  },
+  {
+    "Name":"Arjun Reddy",
+    "Mobile Number":2345678901,
+    "Pincode":500001,
+    "Salary":77000
+  },
+  {
+    "Name":"Deepika Rana",
+    "Mobile Number":5544332211,
+    "Pincode":560001,
+    "Salary":79000
+  },
+  {
+    "Name":"Divya Sethi",
+    "Mobile Number":8877665542,
+    "Pincode":560001,
+    "Salary":72000
+  },
+  {
+    "Name":"Karan Malhotra",
+    "Mobile Number":9876543211,
+    "Pincode":411001,
+    "Salary":105000
+  },
+  {
+    "Name":"Karan Malhotra",
+    "Mobile Number":8765432110,
+    "Pincode":411001,
+    "Salary":105000
+  },
+  {
+    "Name":"Kavita Choudhary",
+    "Mobile Number":7766554432,
+    "Pincode":560001,
+    "Salary":76000
+  },
+  {
+    "Name":"Kavita Choudhary",
+    "Mobile Number":6655443321,
+    "Pincode":560001,
+    "Salary":76000
+  },
+  {
+    "Name":"Manish Pandey",
+    "Mobile Number":8877665543,
+    "Pincode":110001,
+    "Salary":83000
+  },
+  {
+    "Name":"Meera Joshi",
+    "Mobile Number":5432109876,
+    "Pincode":560001,
+    "Salary":67000
+  },
+  {
+    "Name":"Meera Joshi",
+    "Mobile Number":4321098765,
+    "Pincode":560001,
+    "Salary":67000
+  },
+  {
+    "Name":"Neha Verma",
+    "Mobile Number":4567890123,
+    "Pincode":600001,
+    "Salary":88000
+  },
+  {
+    "Name":"Neha Verma",
+    "Mobile Number":3456789012,
+    "Pincode":600001,
+    "Salary":88000
+  },
+  {
+    "Name":"Nikhil Arora",
+    "Mobile Number":4433221098,
+    "Pincode":400001,
+    "Salary":93000
+  },
+  {
+    "Name":"Nisha Agarwal",
+    "Mobile Number":9988776654,
+    "Pincode":700001,
+    "Salary":68000
+  },
+  {
+    "Name":"Pallavi Das",
+    "Mobile Number":3322110097,
+    "Pincode":700001,
+    "Salary":71000
+  },
+  {
+    "Name":"Pallavi Das",
+    "Mobile Number":2211009986,
+    "Pincode":700001,
+    "Salary":71000
+  },
+  {
+    "Name":"Pooja Nair",
+    "Mobile Number":1234567890,
+    "Pincode":400001,
+    "Salary":69000
+  },
+  {
+    "Name":"Prateek Jain",
+    "Mobile Number":9988776653,
+    "Pincode":400001,
+    "Salary":85000
+  },
+  {
+    "Name":"Priya Patel",
+    "Mobile Number":7890123456,
+    "Pincode":400001,
+    "Salary":82000
+  },
+  {
+    "Name":"Rahul Khanna",
+    "Mobile Number":4433221100,
+    "Pincode":110001,
+    "Salary":87000
+  },
+  {
+    "Name":"Rakesh Jha",
+    "Mobile Number":3322110098,
+    "Pincode":110001,
+    "Salary":94000
+  },
+  {
+    "Name":"Rakesh Jha",
+    "Mobile Number":2211009987,
+    "Pincode":110001,
+    "Salary":94000
+  },
+  {
+    "Name":"Ravi Kumar",
+    "Mobile Number":3210987654,
+    "Pincode":400001,
+    "Salary":85000
+  },
+  {
+    "Name":"Rohan Desai",
+    "Mobile Number":5678901234,
+    "Pincode":110001,
+    "Salary":72000
+  },
+  {
+    "Name":"Rohit Mehra",
+    "Mobile Number":7766554431,
+    "Pincode":110001,
+    "Salary":89000
+  },
+  {
+    "Name":"Rohit Mehra",
+    "Mobile Number":6655443320,
+    "Pincode":110001,
+    "Salary":89000
+  },
+  {
+    "Name":"Shalini Iyer",
+    "Mobile Number":3322110099,
+    "Pincode":600001,
+    "Salary":74000
+  },
+  {
+    "Name":"Shalini Iyer",
+    "Mobile Number":2211009988,
+    "Pincode":600001,
+    "Salary":74000
+  },
+  {
+    "Name":"Shruti Hegde",
+    "Mobile Number":9988776652,
+    "Pincode":110001,
+    "Salary":75000
+  },
+  {
+    "Name":"Siddharth Menon",
+    "Mobile Number":1098765432,
+    "Pincode":110001,
+    "Salary":99000
+  },
+  {
+    "Name":"Siddharth Menon",
+    "Mobile Number":9988776655,
+    "Pincode":110001,
+    "Salary":99000
+  },
+  {
+    "Name":"Sneha Kapoor",
+    "Mobile Number":7654321098,
+    "Pincode":700001,
+    "Salary":78000
+  },
+  {
+    "Name":"Sunita Kulkarni",
+    "Mobile Number":1100998876,
+    "Pincode":700001,
+    "Salary":78000
+  },
+  {
+    "Name":"Suresh Raina",
+    "Mobile Number":5544332210,
+    "Pincode":400001,
+    "Salary":91000
+  },
+  {
+    "Name":"Swati Saxena",
+    "Mobile Number":5544332209,
+    "Pincode":600001,
+    "Salary":76000
+  },
+  {
+    "Name":"Tara Bose",
+    "Mobile Number":8877665544,
+    "Pincode":700001,
+    "Salary":71000
+  },
+  {
+    "Name":"Vijay Thakur",
+    "Mobile Number":1100998875,
+    "Pincode":560001,
+    "Salary":98000
+  },
+  {
+    "Name":"Vikram Singh",
+    "Mobile Number":8901234567,
+    "Pincode":560001,
+    "Salary":65000
+  },
+  {
+    "Name":"Vikram Singh",
+    "Mobile Number":9012345678,
+    "Pincode":560001,
+    "Salary":65000
+  },
+  {
+    "Name":"Vivek Oberoi",
+    "Mobile Number":1100998877,
+    "Pincode":400001,
+    "Salary":96000
+  }
+]

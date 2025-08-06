@@ -53,6 +53,10 @@ pydantic_core==2.33.2
 PyMuPDF==1.26.3
 pytesseract==0.3.13
 python-docx==1.2.0
+docx2txt==0.8
+pandas==2.3.2
+openpyxl==3.1.2
+python-pptx==0.6.23
 python-dotenv==1.1.1
 PyYAML==6.0.2
 regex==2025.7.34

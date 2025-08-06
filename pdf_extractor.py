@@ -5,16 +5,18 @@ from langchain_community.document_loaders import (
 )
 import os
 import asyncio
+import json
 from urllib.parse import urlparse
 import aiohttp
 from PIL import Image
 import pytesseract
 from io import BytesIO
+import pandas as pd
+from pptx import Presentation
 
 
-# If tesseract.exe is in your current directory
-# pytesseract.pytesseract.tesseract_cmd = os.path.join(os.getcwd(), 'tesseract.exe')
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+# Set Tesseract path to the working installation
+pytesseract.pytesseract.tesseract_cmd = r'D:\Softwares\Tesseract\tesseract.exe'
 
 
 
@@ -27,6 +29,14 @@ async def fetch_image_bytes(url: str) -> bytes:
                 raise Exception(f"Failed to download image: {url}")
             return await response.read()
 
+
+async def fetch_file_bytes(url: str) -> bytes:
+    """Download file bytes from a URL using aiohttp."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status != 200:
+                raise Exception(f"Failed to download file: {url}")
+            return await response.read()
 
 async def extract_pdf_content(url: str):
     """
@@ -45,9 +55,21 @@ async def extract_pdf_content(url: str):
         return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(pages)]}
 
     elif ext == ".docx":
-        loader = Docx2txtLoader(url)
-        docs = loader.load()
-        return {"pages": [{"page": 1, "text": docs[0].page_content}]}
+        # Download the DOCX file first, then use local path
+        file_bytes = await fetch_file_bytes(url)
+        temp_file = f"temp_docx_{os.path.basename(path)}"
+        
+        try:
+            with open(temp_file, 'wb') as f:
+                f.write(file_bytes)
+            
+            loader = Docx2txtLoader(temp_file)
+            docs = loader.load()
+            return {"pages": [{"page": 1, "text": docs[0].page_content}]}
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
     elif ext in [".eml", ".msg"]:
         loader = UnstructuredEmailLoader(url)
@@ -59,7 +81,103 @@ async def extract_pdf_content(url: str):
         image = Image.open(BytesIO(image_bytes))
         text = pytesseract.image_to_string(image)
         print("Image text", text)
-        return {"pages": [{"image": os.path.basename(path), "text": text.strip()}]}
+        return {"pages": [{"page": 1, "text": text.strip()}]}
+
+    elif ext in [".xlsx", ".xls"]:
+        # Download the Excel file first, then convert to JSON
+        file_bytes = await fetch_file_bytes(url)
+        temp_file = f"temp_excel_{os.path.basename(path)}"
+        
+        try:
+            with open(temp_file, 'wb') as f:
+                f.write(file_bytes)
+            
+            # Read Excel with pandas
+            df = pd.read_excel(temp_file, engine='openpyxl')
+            
+            # Handle missing values for LLM context
+            df_clean = df.fillna('')
+            
+            # Convert to JSON with records orientation (best for LLM)
+            json_data = df_clean.to_json(orient='records', indent=2)
+            
+            # Parse JSON to get the data structure
+            json_obj = json.loads(json_data)
+            
+            # Return the actual data as text
+            return {
+                "pages": [{
+                    "page": 1, 
+                    "text": json_data
+                }]
+            }
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
+    elif ext in [".ppt", ".pptx"]:
+        # Download the PowerPoint file first, then extract content
+        file_bytes = await fetch_file_bytes(url)
+        temp_file = f"temp_ppt_{os.path.basename(path)}"
+        
+        try:
+            with open(temp_file, 'wb') as f:
+                f.write(file_bytes)
+            
+            # Load presentation
+            prs = Presentation(temp_file)
+            pages = []
+            
+            # Process each slide
+            for slide_num, slide in enumerate(prs.slides, 1):
+                slide_text = []
+                
+                # Process each shape in the slide
+                for shape in slide.shapes:
+                    # Check if shape has text
+                    if hasattr(shape, 'text') and shape.text.strip():
+                        slide_text.append(shape.text.strip())
+                    
+                    # Check if shape is an image
+                    if hasattr(shape, 'image'):
+                        try:
+                            # Get image data
+                            image_data = shape.image.blob
+                            
+                            # Process image with OCR - improved error handling
+                            image = Image.open(BytesIO(image_data))
+                            
+                            # Convert to RGB if needed to avoid Windows elevation issues
+                            if image.mode != 'RGB':
+                                image = image.convert('RGB')
+                            
+                            # Try OCR with different configurations
+                            try:
+                                ocr_text = pytesseract.image_to_string(image, config='--psm 6')
+                            except:
+                                # Fallback to default configuration
+                                ocr_text = pytesseract.image_to_string(image)
+                            
+                            if ocr_text.strip():
+                                slide_text.append(ocr_text.strip())
+                        except Exception as e:
+                            print(f"Error processing image in slide {slide_num}: {e}")
+                            # Continue processing other shapes
+                
+                # Add slide to pages
+                pages.append({
+                    "page": slide_num,
+                    "text": "\n".join(slide_text)
+                })
+            
+            return {"pages": pages}
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
 
     else:
         # Default fallback to PDF
