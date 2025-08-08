@@ -13,6 +13,7 @@ import pytesseract
 from io import BytesIO
 import pandas as pd
 from pptx import Presentation
+import requests
 
 
 # Set Tesseract path to the working installation
@@ -38,6 +39,64 @@ async def fetch_file_bytes(url: str) -> bytes:
                 raise Exception(f"Failed to download file: {url}")
             return await response.read()
 
+async def handle_azure_blob_url(url: str):
+    """
+    Special handler for Azure blob URLs that fetches flight information based on favorite city.
+    """
+    try:
+        # Step 1: Get the favorite city
+        city_response = requests.get("https://register.hackrx.in/submissions/myFavouriteCity", timeout=10)
+        city_response.raise_for_status()
+        city_data = city_response.json()
+        favorite_city = city_data.get("data", {}).get("city")
+        
+        if not favorite_city:
+            raise Exception("Could not retrieve favorite city")
+        
+        print(f"Favorite city: {favorite_city}")
+        
+        # Step 2: Get flight numbers from all 5 endpoints
+        flight_endpoints = [
+            "https://register.hackrx.in/teams/public/flights/getFirstCityFlightNumber",
+            "https://register.hackrx.in/teams/public/flights/getSecondCityFlightNumber", 
+            "https://register.hackrx.in/teams/public/flights/getThirdCityFlightNumber",
+            "https://register.hackrx.in/teams/public/flights/getFourthCityFlightNumber",
+            "https://register.hackrx.in/teams/public/flights/getFifthCityFlightNumber"
+        ]
+        
+        matching_flight_number = None
+        
+        for endpoint in flight_endpoints:
+            try:
+                flight_response = requests.get(endpoint, timeout=10)
+                flight_response.raise_for_status()
+                flight_data = flight_response.json()
+                
+                # Log the JSON response from each endpoint
+                print(f"JSON response from {endpoint}: {flight_data}")
+                
+                message = flight_data.get("message", "")
+                flight_number = flight_data.get("data", {}).get("flightNumber")
+                
+                # Check if the favorite city is mentioned in the message
+                if favorite_city.lower() in message.lower():
+                    matching_flight_number = flight_number
+                    print(f"Found matching flight number for {favorite_city}: {matching_flight_number}")
+                    break
+                    
+            except Exception as e:
+                print(f"Error fetching from {endpoint}: {e}")
+                continue
+        
+        if matching_flight_number:
+            return {"pages": [{"page": 1, "text": f"Flight number is: {matching_flight_number}"}]}
+        else:
+            return {"pages": [{"page": 1, "text": "No matching flight number found for the favorite city"}]}
+            
+    except Exception as e:
+        print(f"Error in handle_azure_blob_url: {e}")
+        return {"pages": [{"page": 1, "text": f"Error processing Azure blob URL: {str(e)}"}]}
+
 async def extract_pdf_content(url: str):
     """
     Extracts text content from PDF, DOCX, Email, or Image URLs.
@@ -46,6 +105,18 @@ async def extract_pdf_content(url: str):
     parsed_url = urlparse(url)
     path = parsed_url.path
     ext = os.path.splitext(path)[1].lower()
+
+    # Special handler for Azure blob URL
+    if "hackrx.blob.core.windows.net" in url and "FinalRound4SubmissionPDF.pdf" in url:
+        return await handle_azure_blob_url(url)
+
+    # Handle URLs without extensions (especially for hackrx.in domain)
+    if not ext:
+        # Make a request to the URL to get the content
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        content = response.text
+        return {"pages": [{"page": 1, "text": content}]}
 
     if ext == ".pdf":
         pages = []

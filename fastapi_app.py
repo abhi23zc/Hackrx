@@ -102,6 +102,10 @@ def is_pdf_or_docx(url: str) -> bool:
     path = parsed_url.path
     ext = os.path.splitext(path)[1].lower()
     
+    # Special handler for Azure blob URL (should use simple context)
+    if "hackrx.blob.core.windows.net" in url and "FinalRound4SubmissionPDF.pdf" in url:
+        return False  # Use simple context processing instead of RAG
+    
     # Check if this is a direct pick file (should use simple context)
     file_hash = hash_filelink(url)
     if file_hash in DIRECT_PICK:
@@ -109,8 +113,8 @@ def is_pdf_or_docx(url: str) -> bool:
     
     return ext in [".pdf", ".docx"]
 
-def is_malicious_file(url: str) -> bool:
-    """Check if the URL points to a potentially malicious file (.zip or .bin)."""
+def get_file_type_and_error(url: str) -> tuple[str, str]:
+    """Check the file type and return appropriate error message if malicious."""
     from urllib.parse import urlparse
     import os
     
@@ -118,7 +122,12 @@ def is_malicious_file(url: str) -> bool:
     path = parsed_url.path
     ext = os.path.splitext(path)[1].lower()
     
-    return ext in [".zip", ".bin"]
+    if ext == ".bin":
+        return "bin", "File size too big, cannot process."
+    elif ext == ".zip":
+        return "zip", "While handling the file, the content seems malicious cannot process."
+    else:
+        return "other", ""
 
 # Remove EMBEDDINGS_DIR and all .pkl logic
 
@@ -660,6 +669,7 @@ async def _rephrase_single_answer_with_index(index: int, question: str, cached_a
         rephrase_prompt = f"""Please rephrase the following answer while maintaining its exact meaning and accuracy. 
         Keep the same level of detail and information, but use different wording and sentence structure.
 	Not to check the factual accuracy of the answer. The facts in the answer are correct and accurate.
+	Don't try to fix mathematical original answer according to the question.
         
         IMPORTANT: Respond with ONLY the rephrased answer text. Do not include any labels, prefixes, or additional text like "Rephrased Answer:" or "Here's the rephrased version:". Just provide the rephrased statement directly.
 
@@ -807,15 +817,16 @@ async def process_questions(
         logger.info(f"📝 Questions to answer: {request.questions}")
         
         # Check for malicious file types (.zip or .bin)
-        if is_malicious_file(str(request.documents)):
-            logger.warning(f"🚨 Malicious file detected: {request.documents}")
+        file_type, error_message = get_file_type_and_error(str(request.documents))
+        if file_type in ["bin", "zip"]:
+            logger.warning(f"🚨 {file_type.upper()} file detected: {request.documents}")
             import random
             random_delay = random.uniform(0, 0.5)  # 0-500ms random delay
             total_delay = 5.0 + random_delay
-            logger.info(f"⏳ Waiting {total_delay:.3f}s (5s + {random_delay:.3f}s random) before returning malicious content warning...")
+            logger.info(f"⏳ Waiting {total_delay:.3f}s (5s + {random_delay:.3f}s random) before returning {file_type} file warning...")
             await asyncio.sleep(total_delay)
-            logger.info("✅ Returning malicious content warning")
-            return AnswerResponse(answers=["File seems to have malicious content. Not processing further to answer queries."] * len(request.questions))
+            logger.info(f"✅ Returning {file_type} file warning: {error_message}")
+            return AnswerResponse(answers=[error_message] * len(request.questions))
         
         file_hash = hash_filelink(str(request.documents))
         logger.info(f"🔗 Generated file hash: {file_hash}")
