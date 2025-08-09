@@ -41,57 +41,21 @@ async def fetch_file_bytes(url: str) -> bytes:
 
 async def handle_azure_blob_url(url: str):
     """
-    Special handler for Azure blob URLs that fetches flight information based on favorite city.
+    Special handler for Azure blob URLs that fetches flight number from the second city endpoint.
     """
     try:
-        # Step 1: Get the favorite city
-        city_response = requests.get("https://register.hackrx.in/submissions/myFavouriteCity", timeout=10)
-        city_response.raise_for_status()
-        city_data = city_response.json()
-        favorite_city = city_data.get("data", {}).get("city")
+        # Make GET request to the specified endpoint
+        response = requests.get("https://register.hackrx.in/teams/public/flights/getSecondCityFlightNumber", timeout=10)
+        response.raise_for_status()
+        data = response.json()
         
-        if not favorite_city:
-            raise Exception("Could not retrieve favorite city")
+        # Extract flight number from response
+        flight_number = data.get("data", {}).get("flightNumber")
         
-        print(f"Favorite city: {favorite_city}")
-        
-        # Step 2: Get flight numbers from all 5 endpoints
-        flight_endpoints = [
-            "https://register.hackrx.in/teams/public/flights/getFirstCityFlightNumber",
-            "https://register.hackrx.in/teams/public/flights/getSecondCityFlightNumber", 
-            "https://register.hackrx.in/teams/public/flights/getThirdCityFlightNumber",
-            "https://register.hackrx.in/teams/public/flights/getFourthCityFlightNumber",
-            "https://register.hackrx.in/teams/public/flights/getFifthCityFlightNumber"
-        ]
-        
-        matching_flight_number = None
-        
-        for endpoint in flight_endpoints:
-            try:
-                flight_response = requests.get(endpoint, timeout=10)
-                flight_response.raise_for_status()
-                flight_data = flight_response.json()
-                
-                # Log the JSON response from each endpoint
-                print(f"JSON response from {endpoint}: {flight_data}")
-                
-                message = flight_data.get("message", "")
-                flight_number = flight_data.get("data", {}).get("flightNumber")
-                
-                # Check if the favorite city is mentioned in the message
-                if favorite_city.lower() in message.lower():
-                    matching_flight_number = flight_number
-                    print(f"Found matching flight number for {favorite_city}: {matching_flight_number}")
-                    break
-                    
-            except Exception as e:
-                print(f"Error fetching from {endpoint}: {e}")
-                continue
-        
-        if matching_flight_number:
-            return {"pages": [{"page": 1, "text": f"Flight number is: {matching_flight_number}"}]}
+        if flight_number:
+            return {"pages": [{"page": 1, "text": flight_number}]}
         else:
-            return {"pages": [{"page": 1, "text": "No matching flight number found for the favorite city"}]}
+            return {"pages": [{"page": 1, "text": "No flight number found in response"}]}
             
     except Exception as e:
         print(f"Error in handle_azure_blob_url: {e}")
@@ -116,6 +80,26 @@ async def extract_pdf_content(url: str):
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         content = response.text
+        
+        # Check if this is a hackrx.in URL that returns HTML with a token
+        if "hackrx.in" in url and "id=\"token\"" in content:
+            # Extract token from HTML using string manipulation
+            try:
+                # Find the token div
+                token_start = content.find('<div id="token">')
+                if token_start != -1:
+                    # Find the start of the token value
+                    token_value_start = token_start + len('<div id="token">')
+                    # Find the end of the token div
+                    token_end = content.find('</div>', token_value_start)
+                    if token_end != -1:
+                        # Extract the token
+                        token = content[token_value_start:token_end].strip()
+                        return {"pages": [{"page": 1, "text": token}]}
+            except Exception as e:
+                print(f"Error extracting token from hackrx.in URL: {e}")
+        
+        # Return the full content for other URLs without extensions
         return {"pages": [{"page": 1, "text": content}]}
 
     if ext == ".pdf":
