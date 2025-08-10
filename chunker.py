@@ -1,6 +1,6 @@
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-def chunk_text(pages, chunk_size=500, chunk_overlap=100):
+def chunk_text(pages, chunk_size=750, chunk_overlap=100):
     """
     Splits extracted PDF pages into overlapping text chunks.
     
@@ -31,13 +31,3 @@ def chunk_text(pages, chunk_size=500, chunk_overlap=100):
             })
 
     return all_chunks
-
-
-# from pdf_extractor import extract_pdf_content
-# from chunker import chunk_text
-
-# pdf_data = extract_pdf_content("dataset1.pdf")
-# chunks = chunk_text(pdf_data["pages"])
-
-# print(f"Total chunks: {len(chunks)}")
-# print("Sample chunk:", chunks[0])

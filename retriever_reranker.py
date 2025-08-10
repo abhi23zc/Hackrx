@@ -1,65 +1,67 @@
-import numpy as np
-import faiss
+import os
 import json
 import torch
+import numpy as np
+import faiss
+from typing import List, Dict
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from sentence_transformers import SentenceTransformer
 
+# Device configuration
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Load models
-device = "cuda" if torch.cuda.is_available() else "cpu"
+embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-# Reranker: HuggingFace Cross-Encoder (Fast)
+# ---- Reranker Model: BGE Reranker Large ----
 reranker_model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
 reranker_tokenizer = AutoTokenizer.from_pretrained(reranker_model_name)
 reranker_model = AutoModelForSequenceClassification.from_pretrained(reranker_model_name).to(device)
 
-# Embedder: Sentence-Transformer MiniLM
-embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
-
-def load_index_and_metadata(index_path="vector_store/index.faiss", meta_path="vector_store/metadata.json"):
+def load_index_and_metadata(index_path, meta_path):
+    if not os.path.exists(index_path) or not os.path.exists(meta_path):
+        raise FileNotFoundError("Index or metadata file not found.")
     index = faiss.read_index(index_path)
     with open(meta_path, "r", encoding="utf-8") as f:
         metadata = json.load(f)
     return index, metadata
 
 
-def retrieve_top_k(query: str, k=10):
-    query_embedding = embed_model.encode([query], convert_to_numpy=True)
-    faiss.normalize_L2(query_embedding)
-
-    index, metadata = load_index_and_metadata()
-    distances, indices = index.search(query_embedding, k)
-
-    retrieved = []
+def retrieve_top_k(query: str, k: int, index_path: str, meta_path: str) -> List[Dict]:
+    query_emb = embed_model.encode(["query: " + query], convert_to_numpy=True)
+    faiss.normalize_L2(query_emb)
+    index, metadata = load_index_and_metadata(index_path, meta_path)
+    distances, indices = index.search(query_emb, k)
+    results = []
     for rank, i in enumerate(indices[0]):
+        if i >= len(metadata):
+            continue
         meta = metadata[i]
-        retrieved.append({
-            "text": meta["text"],
-            "page": meta["page"],
-            "chunk_index": meta["chunk_index"],
+        results.append({
+            "text": meta.get("text", ""),
+            "page": meta.get("page", -1),
+            "chunk_index": meta.get("chunk_index", i),
             "score": float(distances[0][rank])
         })
+    return results
 
-    return retrieved
 
-
-def rerank_chunks(query: str, chunks: list, top_n=5):
+def rerank_chunks(query: str, chunks: List[Dict], top_n: int = 3) -> List[Dict]:
     """
-    Rerank FAISS-retrieved chunks using Cross-Encoder.
+    Rerank retrieved chunks using a Cross-Encoder (reranker model).
 
     Args:
-        query: User input string
-        chunks: List of chunks (with "text")
-        top_n: Return top-N reranked
+        query: Original query string
+        chunks: Retrieved chunks with text
+        top_n: How many top reranked results to return
 
     Returns:
-        List of top-N chunks sorted by relevance
+        Top-N reranked chunks
     """
     input_pairs = [(query, chunk["text"]) for chunk in chunks]
     inputs = reranker_tokenizer.batch_encode_plus(
-        input_pairs, padding=True, truncation=True, return_tensors="pt"
+        input_pairs, padding=True, truncation=True, return_tensors="pt", max_length=512
     ).to(device)
 
     with torch.no_grad():
@@ -73,10 +75,11 @@ def rerank_chunks(query: str, chunks: list, top_n=5):
     return reranked[:top_n]
 
 
-# query = "Is icu treatment covered under this policy and are there any limits?"
+# Example usage:
+# query = "Is ICU treatment covered under this policy and are there any limits?"
 # top_chunks = retrieve_top_k(query, k=10)
 # final_chunks = rerank_chunks(query, top_chunks, top_n=5)
 
-# for c in final_chunks:
-#     print(f"\n[Page {c['page']}] Score: {c['rerank_score']:.4f}")
-#     print(c["text"][:300], "...")
+# for chunk in final_chunks:
+#     print(f"\n[Page {chunk['page']}] Rerank Score: {chunk['rerank_score']:.4f}")
+#     print(chunk['text'][:300] + "...")

@@ -14,8 +14,15 @@ def build_prompt_with_sources(query, context_chunks, max_chars=4000):
         prompt (str): Final prompt string for LLM
         used_sources (list): Chunks actually used
     """
-    intro = "You are an expert assistant. Answer the question using only the provided context.\n"
-    intro += "Cite the page number in parentheses like (Page 3). Be accurate.\n\n"
+    intro = "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\n"
+    intro += "CRITICAL RULES:\n"
+    intro += "- Answer exactly what is asked with the most important details only\n"
+    intro += "- Include specific numbers, time periods, and key conditions\n"
+    intro += "- Keep answers to 1-2 sentences maximum\n"
+    intro += "- Use clear, professional language\n"
+    intro += "- Focus on the core information requested\n"
+    intro += "- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\n"
+    intro += "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question.\n\n"
     
     context_header = "### Context:\n"
     prompt_header = "\n### Question:\n"
@@ -54,8 +61,15 @@ def build_prompt_without_sources(query, context_chunks, max_chars=6000):
         str: Final prompt for LLM
     """
     intro = (
-        "You are a helpful assistant. Answer the question as clearly and concisely as possible "
-        "using only the provided context. Do not mention any page numbers or sources. Just provide a natural, accurate answer.\n\n"
+        "You are a specialized AI assistant for health insurance policy analysis. Provide precise, factual answers based on the policy document.\n\n"
+        "CRITICAL RULES:\n"
+        "- Answer exactly what is asked with the most important details only\n"
+        "- Include specific numbers, time periods, and key conditions\n"
+        "- Keep answers to 1-2 sentences maximum\n"
+        "- Use clear, professional language\n"
+        "- Focus on the core information requested\n"
+        "- If information is not in the context, respond with: \"Information not available in the provided document.\"\n\n"
+        "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only the essential policy details that directly answer the question.\n\n"
     )
 
     context_header = "### Context:\n"

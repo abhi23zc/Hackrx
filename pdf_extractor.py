@@ -1,37 +1,34 @@
-import fitz  # PyMuPDF
+from langchain_community.document_loaders import (
+    PyMuPDFLoader,
+    Docx2txtLoader,
+    UnstructuredEmailLoader
+)
+import os
+
 
 def extract_pdf_content(file_path: str):
     """
-    Efficiently extract text from a PDF using PyMuPDF (fitz),
-    returning both full text and per-page structured chunks.
+    Extracts text content from PDF, DOCX, or Email files using LangChain loaders.
+    Returns a list of dicts with 'page' (or 'part') and 'text'.
     """
-    doc = fitz.open(file_path)
-    full_text = ""
-    page_chunks = []
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        loader = PyMuPDFLoader(file_path)
+        docs = loader.load()
+        return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(docs)]}
+    elif ext == ".docx":
+        loader = Docx2txtLoader(file_path)
+        docs = loader.load()
+        return {"pages": [{"page": 1, "text": docs[0].page_content}]}
+    elif ext in [".eml", ".msg"]:
+        loader = UnstructuredEmailLoader(file_path)
+        docs = loader.load()
+        return {"pages": [{"part": i+1, "text": doc.page_content} for i, doc in enumerate(docs)]}
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
 
-    for page_num, page in enumerate(doc, start=1):
-        try:
-            text = page.get_text("text")
-            if text.strip():
-                page_chunks.append({
-                    "page": page_num,
-                    "text": text.strip()
-                })
-                full_text += f"\n\nPage {page_num}:\n{text.strip()}"
-        except Exception as e:
-            print(f"Warning: Failed to extract page {page_num}: {e}")
-            continue
-
-    doc.close()
-    return {
-        "full_text": full_text.strip(),
-        "pages": page_chunks
-    }
-
-
+# Example usage:
 # if __name__ == "__main__":
-#     file_path = "dataset1.pdf"
-#     result = extract_pdf_content(file_path)
-
-#     print("Full text length:", len(result["full_text"]))
-#     print("First page text preview:\n", result["pages"][0]["text"][:300])
+#     file_path = "example.pdf"  # or .docx, .eml, .msg
+#     result = extract_document_content(file_path)
+#     print(result)
