@@ -14,6 +14,15 @@ from io import BytesIO
 import pandas as pd
 from pptx import Presentation
 import requests
+import openai
+import os
+import re
+import logging
+from typing import Optional
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 # Set Tesseract path to the working installation
@@ -39,27 +48,7 @@ async def fetch_file_bytes(url: str) -> bytes:
                 raise Exception(f"Failed to download file: {url}")
             return await response.read()
 
-async def handle_azure_blob_url(url: str):
-    """
-    Special handler for Azure blob URLs that fetches flight number from the second city endpoint.
-    """
-    try:
-        # Make GET request to the specified endpoint
-        response = requests.get("https://register.hackrx.in/teams/public/flights/getSecondCityFlightNumber", timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Extract flight number from response
-        flight_number = data.get("data", {}).get("flightNumber")
-        
-        if flight_number:
-            return {"pages": [{"page": 1, "text": flight_number}]}
-        else:
-            return {"pages": [{"page": 1, "text": "No flight number found in response"}]}
-            
-    except Exception as e:
-        print(f"Error in handle_azure_blob_url: {e}")
-        return {"pages": [{"page": 1, "text": f"Error processing Azure blob URL: {str(e)}"}]}
+
 
 async def extract_pdf_content(url: str):
     """
@@ -72,7 +61,13 @@ async def extract_pdf_content(url: str):
 
     # Special handler for Azure blob URL
     if "hackrx.blob.core.windows.net" in url and "FinalRound4SubmissionPDF.pdf" in url:
-        return await handle_azure_blob_url(url)
+        # Use the complex multi-step LLM processing function
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        if not openrouter_api_key:
+            return {"pages": [{"page": 1, "text": "OPENROUTER_API_KEY not found in environment variables"}]}
+        
+        result = await process_azure_blob_with_llm(url, openrouter_api_key)
+        return {"pages": [{"page": 1, "text": result}]}
 
     # Handle URLs without extensions (especially for hackrx.in domain)
     if not ext:
@@ -223,3 +218,229 @@ async def extract_pdf_content(url: str):
         async for page in loader.alazy_load():
             pages.append(page)
         return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(pages)]}
+
+
+async def process_azure_blob_with_llm(url: str, openrouter_api_key: str) -> Optional[str]:
+    """
+    Multi-step process for Azure blob URLs:
+    1. Extract PDF content using PyMuPDF
+    2. Send to LLM to get link from step 1
+    3. Get city from the link response
+    4. Use city to find landmarks in PDF table
+    5. Get endpoint from landmarks
+    6. Return flight number from endpoint
+    """
+    try:
+        logger.info(f"=== STARTING AZURE BLOB PROCESSING ===")
+        logger.info(f"Input URL: {url}")
+        
+        # Step 1: Extract PDF content using PyMuPDF
+        import fitz  # PyMuPDF
+        import tempfile
+        
+        # Download PDF content
+        logger.info("Downloading PDF file...")
+        file_bytes = await fetch_file_bytes(url)
+        logger.info(f"Downloaded {len(file_bytes)} bytes")
+        
+        # Create temporary file for PyMuPDF
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as temp_file:
+            temp_file.write(file_bytes)
+            temp_file_path = temp_file.name
+        
+        try:
+            # Extract text with PyMuPDF (retains tables)
+            logger.info("Extracting PDF content with PyMuPDF...")
+            doc = fitz.open(temp_file_path)
+            pdf_content = ""
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                pdf_content += page.get_text()
+            doc.close()
+            logger.info(f"Extracted PDF content: {len(pdf_content)} characters")
+            logger.debug(f"PDF Content Preview: {pdf_content[:500]}...")
+            
+            # Step 2: Send to LLM to get link from step 1
+            logger.info("=== STEP 1: Getting link from Step 1 ===")
+            
+            client = openai.OpenAI(
+                api_key=openrouter_api_key,
+                base_url="https://openrouter.ai/api/v1"
+            )
+            
+            step1_prompt = f"""
+            You are analyzing a PDF document. Look for any link or URL mentioned in step 1 of the document.
+            
+            PDF Content:
+            {pdf_content}
+            
+            Instructions:
+            - Find the link/URL mentioned in step 1 of the Step-by-Step Guide
+            - Only reply with the link/URL, nothing else, not even GET/POST/PUT/DELETE/etc.
+            - If no link is found in step 1, reply with "NO_LINK_FOUND"
+            
+            Link from step 1:
+            """
+            
+            logger.info(f"Step 1 Prompt:\n{step1_prompt}")
+            
+            step1_response = client.chat.completions.create(
+                model="meta-llama/llama-3.3-70b-instruct",
+                messages=[{"role": "user", "content": step1_prompt}],
+                max_tokens=100,
+                temperature=0.0
+            )
+            
+            step1_link_raw = step1_response.choices[0].message.content.strip()
+            logger.info(f"Step 1 Raw Response: {step1_link_raw}")
+            
+            # Extract URL from response for safety
+            url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+            url_matches = re.findall(url_pattern, step1_link_raw)
+            
+            logger.info(f"Extracted URLs from Step 1 response: {url_matches}")
+            
+            if not url_matches:
+                if "NO_LINK_FOUND" in step1_link_raw:
+                    logger.error("No link found in step 1")
+                    return "No link found in step 1"
+                else:
+                    logger.error(f"Could not extract URL from response: {step1_link_raw}")
+                    return f"Could not extract URL from response: {step1_link_raw}"
+            
+            step1_link = url_matches[0]
+            logger.info(f"Selected Step 1 link: {step1_link}")
+            
+            # Step 3: Send GET request to the link and get city
+            logger.info("=== STEP 3: Getting city from Step 1 link ===")
+            logger.info(f"Making GET request to: {step1_link}")
+            
+            response = requests.get(step1_link, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            logger.info(f"Step 3 Response Status: {response.status_code}")
+            logger.info(f"Step 3 Response Data: {data}")
+            
+            city = data.get("data", {}).get("city")
+            if not city:
+                logger.error("No city found in response")
+                return "No city found in response"
+            
+            logger.info(f"Extracted city: {city}")
+            
+            # Step 4: Send PDF content again to LLM to find landmarks for the city
+            logger.info("=== STEP 4: Finding landmarks for the city ===")
+            
+            step4_prompt = f"""
+            You are analyzing a PDF document that contains a "LandMark-Current Location" table.
+            
+            PDF Content:
+            {pdf_content}
+
+            City: {city}
+            
+            Instructions:
+            - Find the "LandMark-Current Location" table in the document
+            - Look for landmarks that correspond to the city: {city}
+            - Return ONLY the landmark names that match this city
+            - If multiple landmarks are found, list them all
+            - Format: Return only the landmark names separated by commas (e.g., "Taj Mahal, Gateway of India, Red Fort")
+            - If no landmarks found for this city, reply with "NO_LANDMARKS_FOUND"
+            """
+            
+            logger.info(f"Step 4 Prompt:\n{step4_prompt}")
+            
+            step4_response = client.chat.completions.create(
+                model="meta-llama/llama-3.3-70b-instruct",
+                messages=[{"role": "user", "content": step4_prompt}],
+                max_tokens=200,
+                temperature=0.1
+            )
+            
+            landmarks_response = step4_response.choices[0].message.content.strip()
+            logger.info(f"Step 4 Response: {landmarks_response}")
+            
+            if landmarks_response == "NO_LANDMARKS_FOUND":
+                logger.error("No landmarks found for the city")
+                return "No landmarks found for the city"
+            
+            # Parse landmarks (split by commas)
+            landmarks = [landmark.strip() for landmark in landmarks_response.split(',') if landmark.strip()]
+            logger.info(f"Parsed landmarks: {landmarks}")
+            
+            # Step 5: Get endpoint from landmarks by matching with Step 3 options
+            logger.info("=== STEP 5: Finding endpoint from landmarks ===")
+            
+            step5_prompt = f"""
+            You are analyzing a PDF document that contains endpoint information in Step 3.
+            
+            PDF Content:
+            {pdf_content}
+            
+            Instructions:
+            - Look at Step 3 of the Step-by-Step Guide which contains 5 options/endpoints
+            - From the landmarks list: {', '.join(landmarks)}
+            - Find which landmark matches the 5 conditons (in order)
+            - Return ONLY the corresponding endpoint URL for that first matching conditon
+            - If no landmarks match any of the 5 options in Step 3, reply with "NO_ENDPOINTS_FOUND"
+            
+            Endpoint for first matching landmark:
+            """
+            
+            logger.info(f"Step 5 Prompt:\n{step5_prompt}")
+            
+            step5_response = client.chat.completions.create(
+                model="meta-llama/llama-3.3-70b-instruct",
+                messages=[{"role": "user", "content": step5_prompt}],
+                max_tokens=300,
+                temperature=0.0
+            )
+            
+            endpoints_response = step5_response.choices[0].message.content.strip()
+            logger.info(f"Step 5 Response: {endpoints_response}")
+            
+            if endpoints_response == "NO_ENDPOINTS_FOUND":
+                logger.error("No endpoints found for the landmarks")
+                return "No endpoints found for the landmarks"
+            
+            # Extract URL from response
+            url_matches = re.findall(url_pattern, endpoints_response)
+            logger.info(f"Extracted URLs from Step 5 response: {url_matches}")
+            
+            if not url_matches:
+                logger.error("No valid URL found in endpoint response")
+                return "No valid URL found in endpoint response"
+            
+            selected_endpoint = url_matches[0]
+            logger.info(f"Selected endpoint: {selected_endpoint}")
+            
+            # Step 6: Send GET request to the endpoint and get flight number
+            logger.info("=== STEP 6: Getting flight number from endpoint ===")
+            logger.info(f"Making GET request to: {selected_endpoint}")
+            
+            final_response = requests.get(selected_endpoint, timeout=10)
+            final_response.raise_for_status()
+            final_data = final_response.json()
+            
+            logger.info(f"Step 6 Response Status: {final_response.status_code}")
+            logger.info(f"Step 6 Response Data: {final_data}")
+            
+            flight_number = final_data.get("data", {}).get("flightNumber")
+            
+            if flight_number:
+                logger.info(f"=== SUCCESS: Found flight number: {flight_number} ===")
+                return flight_number
+            else:
+                logger.error("No flight number found in response")
+                return "No flight number found in response"
+                
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+                logger.info("Cleaned up temporary PDF file")
+                
+    except Exception as e:
+        logger.error(f"Error in process_azure_blob_with_llm: {e}")
+        return f"Error processing: {str(e)}"
