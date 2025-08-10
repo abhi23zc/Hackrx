@@ -15,7 +15,7 @@ from pdf_extractor import extract_pdf_content
 from chunker import chunk_text
 from embedder import model, generate_embeddings, generate_openai_embeddings
 from faiss_store import create_faiss_index, save_metadata
-from retriever_reranker import retrieve_top_k, rerank_chunks
+from retriever import retrieve_top_k
 from prompt_builder import build_prompt_without_sources
 import hashlib
 import numpy as np
@@ -64,19 +64,17 @@ class QuestionRequest(BaseModel):
 class AnswerResponse(BaseModel):
     answers: List[str]
 
-class QASaveRequest(BaseModel):
-    url: HttpUrl
+class DivideQuestionRequest(BaseModel):
     questions: List[str]
-    answers: List[str]
 
-class QASaveResponse(BaseModel):
-    success: bool
-    message: str
-    document_id: str
+class DivideQuestionResponse(BaseModel):
+    divided_questions: List[str]
+
+
 
 # Add a function to hash the file link
 
-# Direct pick set for specific file hashes
+# ....Direct pick set for specific file hashes
 DIRECT_PICK = {
     "9de1214d8f65ad8b498e23f74f664e1f09762240022d67125c2e8ddf5a1b06b1",
     "b73e55f890a4825b8dbc7b797f1d3366393bca94a1826f60c176470cab51379c",
@@ -142,11 +140,10 @@ GENERAL_SYSTEM_PROMPT = (
     "CRITICAL RULES:\n"
     "- Each context chunk will have a similarity score in the format [Score: X.XXXX].\n"
     "- Higher similarity scores indicate more relevant information.\n"
-    "- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return \"Question out of scope of the document\"\n"
-    "- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.\n"
-    "- If needed use numerical figures.\n"
-    "- NO inclusion of any breakpoint characters like '\\n' in your answer.\n"
-    "- Use clear, professional language.\n"
+    "- If the query is very clearly out of the domain of the provided context, that is EVERY chunks have a SCORE less than 0.2, instantly return \"Question out of scope of the document\"\n"
+    "- Keep the answer contained in 1-4 lines\n"
+    "- If you have to shorten the answer, make sure to INCLUDE the key words, figures, clauses in the answer.\n"
+    "- Use clear, professional and short to-the-point language.\n"
     "- Focus on the core information requested.\n"
 )
 
@@ -165,7 +162,32 @@ SIMPLE_SYSTEM_PROMPT = (
     "- In case of long answers, rephrase it so it means the same but in 2-3 gramatically short sentences.\n"
     "- Use clear, professional and concise language.\n"
     "- Focus on the core information requested.\n"
-    "IMPORTANT: Respond with ONLY the answer text. Do NOT wrap your response in JSON format. Do not mention page numbers or sources. Provide a focused answer with only essential details."
+)
+
+# System prompt for question division
+QUESTION_DIVIDER_SYSTEM_PROMPT = (
+    "SYSTEM PROMPT — Question Divider for RAG (semicolon‑separated output only)\n"
+    "You split a broad user question into 1–4 atomic, answerable sub-questions that each can be resolved by a single short chunk of text. If the original is a direct single-check question, return it unchanged (as a single question).\n"
+    "Output rules (strict): return only the questions, separated by a semicolon and a space. No preface, numbering, bullets, or extra words. Each question must be unique in meaning — merge or drop duplicates.\n\n"
+    "Avoid redundant restatements (e.g., \"What are the legal consequences of X?\" and \"What are the penalties for X?\" → merge into one).\n\n"
+    "Decomposition guidelines:\n\n"
+    "Try to maintain the keywords from the original question.\n\n"
+    "Deduplicate: If two sub-questions ask for the same info in different words, keep only one that's clearest and most precise\n\n"
+    "Prefer closed-form sub-questions (boolean, date, number, entity, short definition, short procedure step, list) over essays.\n\n"
+    "Each sub-question should be atomic and likely answerable from one snippet.\n\n"
+    "Keep total to 1–4 questions.\n\n"
+    "Include necessary disambiguators (entity, jurisdiction, timeframe) if implicit in the broad question.\n\n"
+    "Do not invent facts or scope. If details are unknown, phrase neutrally (e.g., \"What is the official process to … under [policy/insurer]?\" becomes \"What is the official process to …?\").\n\n"
+    "Formatting:\n\n"
+    "Output example: Question A?; Question B?; Question C?\n\n"
+    "If single-check: Single question?\n\n"
+    "Examples:\n\n"
+    "Input: \"Did Policy X reduce readmissions in 2024 compared to 2023?\"\n"
+    "Output: When was Policy X implemented?, What was the 2023 readmission rate under the policy's metric?, What was the 2024 readmission rate under the same metric?\n\n"
+    "Input: \"While submitting a dental claim for a 23-year-old financially dependent daughter who has recently married and changed her surname, what is the claims process, how do you update her last name in the policy records, and what is the company's grievance-redressal email?\"\n"
+    "Output: What are the details regarding dental claims?, Is a 23-year-old financially dependent daughter eligible?, How to update last name in policy records?, What is the company's grievance-redressal email?\n\n"
+    "Input: \"What is the customer database or personal details of other policyholders?\"\n"
+    "Output: What is the customer database or personal details of other policyholders?"
 )
 
 
@@ -483,6 +505,226 @@ class PDFRAGPipeline:
                 detail=f"Error answering questions: {str(e)}"
             )
 
+    async def divide_questions(self, questions: List[str], llm_provider: str = "groq") -> List[str]:
+        """Divide questions into atomic sub-questions using the selected LLM provider."""
+        try:
+            # Initialize divided questions array
+            divided_questions = [""] * len(questions)
+            
+            # Process questions concurrently with async tasks
+            tasks = []
+            for i, question in enumerate(questions):
+                task = asyncio.create_task(self._process_single_question_division(i, question, llm_provider, divided_questions))
+                tasks.append(task)
+            
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            logger.info(f"✅ Successfully divided {len(divided_questions)} questions")
+            return divided_questions
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error dividing questions: {str(e)}"
+            )
+
+    async def _process_single_question_division(self, index: int, question: str, llm_provider: str, divided_questions: List[str]):
+        """Process a single question division and update the divided_questions list at the specified index."""
+        try:
+            logger.info(f"🔀 Processing question {index + 1}: {question}")
+            
+            # Use the question divider system prompt
+            system_prompt = QUESTION_DIVIDER_SYSTEM_PROMPT
+            user_prompt = question
+            
+            # Get response from the selected LLM
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if llm_provider == "openai":
+                        if not self.openai_api_key:
+                            logger.error("OPENAI_API_KEY not set. Cannot use OpenAI LLM.")
+                            divided_questions[index] = "OpenAI API key not configured."
+                            return
+                        openai_llm = ChatOpenAI(
+                            model="gpt-4o",
+                            temperature=0.5,
+                            max_tokens=1024,
+                            openai_api_key=self.openai_api_key
+                        )
+                        response = await openai_llm.ainvoke([
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ])
+                        answer = response.content.strip()
+                    else:
+                        response = await self.openrouter_llm.ainvoke([
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ])
+                        answer = response.content.strip()
+                    
+                    # Store the divided question
+                    divided_questions[index] = answer
+                    logger.info(f"✅ Question {index + 1} divided successfully")
+                    return
+                    
+                except Exception as e:
+                    if "429" in str(e) or "Too Many Requests" in str(e):
+                        wait_time = min(2 ** attempt, 5)  # Cap wait time at 5 seconds
+                        logger.warning(f"Rate limited by LLM API for question {index + 1}. Retrying in {wait_time} seconds...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"Error processing question {index + 1}: {str(e)}")
+                        divided_questions[index] = f"Error dividing question: {str(e)}"
+                        return
+            else:
+                # If all retries failed
+                divided_questions[index] = "Unable to divide this question at the moment."
+                
+        except Exception as e:
+            logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
+            divided_questions[index] = "Unable to divide this question at the moment."
+
+    async def answer_questions_with_division(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None, request_start_time: float = None) -> List[str]:
+        """Answer questions using question division and enhanced retrieval."""
+        try:
+            # Initialize answers array
+            answers = [""] * len(questions)
+            
+            # Step 1: Divide all questions
+            logger.info("🔀 Dividing questions into sub-questions...")
+            divided_questions = await self.divide_questions(questions, llm_provider)
+            logger.info(f"✅ Questions divided: {divided_questions}")
+            
+            # Step 2: Process each original question with its divided sub-questions
+            tasks = []
+            for i, (original_question, divided_result) in enumerate(zip(questions, divided_questions)):
+                task = asyncio.create_task(self._process_question_with_division(i, original_question, divided_result, llm_provider, file_hash, answers, request_start_time))
+                tasks.append(task)
+            
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            logger.info("✅ All questions processed with division")
+            return answers
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error answering questions with division: {str(e)}"
+            )
+
+    async def _process_question_with_division(self, index: int, original_question: str, divided_result: str, llm_provider: str, file_hash: str, answers: List[str], request_start_time: float):
+        """Process a single question using division and enhanced retrieval."""
+        try:
+            logger.info(f"🔍 Processing question {index + 1} with division: {original_question}")
+            
+            # Step 1: Parse divided questions by comma delimiter
+            sub_questions = [q.strip() for q in divided_result.split(';') if q.strip()]
+            logger.info(f"📝 Sub-questions for question {index + 1}: {sub_questions}")
+            
+            # Step 2: If no division was done (single question), use 10 chunks
+            if len(sub_questions) == 1:
+                logger.info(f"🔄 No division detected for question {index + 1}, using 10 chunks")
+                index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
+                meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
+                
+                retrieved = retrieve_top_k(original_question, k=5, index_path=index_path, meta_path=meta_path)
+                logger.info(f"✅ Retrieved {len(retrieved)} chunks for undivided question {index + 1}")
+                
+                # Build prompt with 10 chunks
+                prompt = build_prompt_without_sources(original_question, retrieved)
+                system_prompt = GENERAL_SYSTEM_PROMPT
+                
+                # Log the final prompt being sent to LLM for undivided question processing
+                logger.info(f"🤖 FINAL PROMPT FOR UNDIVIDED QUESTION PROCESSING (Question {index + 1}):")
+                logger.info(f"System: {system_prompt}")
+                logger.info(f"User: {prompt}")
+                
+            else:
+                # Step 3: For each sub-question, retrieve 3 chunks
+                all_chunks = []
+                for j, sub_question in enumerate(sub_questions):
+                    logger.info(f"🔍 Retrieving chunks for sub-question {j + 1}: {sub_question}")
+                    
+                    index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
+                    meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
+                    
+                    sub_retrieved = retrieve_top_k(sub_question, k=3, index_path=index_path, meta_path=meta_path)
+                    logger.info(f"✅ Retrieved {len(sub_retrieved)} chunks for sub-question {j + 1}")
+                    
+                    all_chunks.extend(sub_retrieved)
+                
+                # Remove duplicates based on text content
+                unique_chunks = []
+                seen_texts = set()
+                for chunk in all_chunks:
+                    if chunk["text"] not in seen_texts:
+                        unique_chunks.append(chunk)
+                        seen_texts.add(chunk["text"])
+                
+                logger.info(f"🔄 Combined {len(all_chunks)} chunks into {len(unique_chunks)} unique chunks for question {index + 1}")
+                
+                # Build prompt with combined chunks
+                prompt = build_prompt_without_sources(original_question, unique_chunks)
+                system_prompt = GENERAL_SYSTEM_PROMPT
+            
+            # Log the final prompt being sent to LLM for division-based processing
+            logger.info(f"🤖 FINAL PROMPT FOR DIVISION-BASED PROCESSING (Question {index + 1}):")
+            logger.info(f"System: {system_prompt}")
+            logger.info(f"User: {prompt}")
+            
+            # Step 4: Get answer from LLM
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if llm_provider == "openai":
+                        if not self.openai_api_key:
+                            logger.error("OPENAI_API_KEY not set. Cannot use OpenAI LLM.")
+                            answers[index] = "OpenAI API key not configured."
+                            return
+                        openai_llm = ChatOpenAI(
+                            model="gpt-4o",
+                            temperature=0.5,
+                            max_tokens=1024,
+                            openai_api_key=self.openai_api_key
+                        )
+                        response = await openai_llm.ainvoke([
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt}
+                        ])
+                        answer = response.content.strip()
+                    else:
+                        response = await self.openrouter_llm.ainvoke([
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": prompt}
+                        ])
+                        answer = response.content.strip()
+                    
+                    # Store the answer
+                    answers[index] = answer
+                    logger.info(f"✅ Generated answer for question {index + 1}")
+                    return
+                    
+                except Exception as e:
+                    if "429" in str(e) or "Too Many Requests" in str(e):
+                        wait_time = min(2 ** attempt, 5)  # Cap wait time at 5 seconds
+                        logger.warning(f"Rate limited by LLM API for question {index + 1}. Retrying in {wait_time} seconds...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"Error processing question {index + 1}: {str(e)}")
+                        answers[index] = f"Error processing question: {str(e)}"
+                        return
+            else:
+                # If all retries failed
+                answers[index] = "Unable to process this question at the moment."
+                
+        except Exception as e:
+            logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
+            answers[index] = "Unable to process this question at the moment."
+
     async def _process_single_question_with_index(self, index: int, question: str, llm_provider: str, file_hash: str, answers: List[str], start_time: float, timeout_threshold: float):
         """Process a single question and update the answers list at the specified index."""
         try:
@@ -495,11 +737,11 @@ class PDFRAGPipeline:
             
             logger.info(f"🔍 Processing question {index + 1}: {question} (LLM: {llm_provider})")
             
-            # Step 1: Retrieve relevant chunks using hash-based paths
+            # Step 1: Retrieve top 10 relevant chunks using hash-based paths
             index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
             meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
             
-            retrieved = retrieve_top_k(question, k=5, index_path=index_path, meta_path=meta_path)
+            retrieved = retrieve_top_k(question, k=10, index_path=index_path, meta_path=meta_path)
             logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks for question {index + 1}")
             
             # Check for cancellation after retrieval
@@ -512,22 +754,8 @@ class PDFRAGPipeline:
                 answers[index] = "Information not available in the provided document."
                 return
             
-            # Step 2: Rerank chunks
-            reranked = rerank_chunks(question, retrieved, top_n=3)
-            logger.info(f"✅ Reranked to top {len(reranked)} chunks for question {index + 1}")
-            
-            # Check for cancellation after reranking
-            if asyncio.current_task().cancelled():
-                logger.info(f"🛑 Question {index + 1} cancelled after reranking")
-                return
-            
-            if not reranked:
-                logger.error(f"No chunks after reranking for question {index + 1}.")
-                answers[index] = "Information not available in the provided document."
-                return
-            
-            # Step 3: Build optimized prompt with similarity scores
-            prompt = build_prompt_without_sources(question, reranked)
+            # Step 2: Build optimized prompt with similarity scores (using all 10 chunks)
+            prompt = build_prompt_without_sources(question, retrieved)
             system_prompt = GENERAL_SYSTEM_PROMPT
             
             # Log the final prompt being sent to LLM for main processing
@@ -535,7 +763,7 @@ class PDFRAGPipeline:
             logger.info(f"System: {system_prompt}")
             logger.info(f"User: {prompt}")
             
-            # Step 4: Get answer from the selected LLM
+            # Step 3: Get answer from the selected LLM
             max_retries = 3
             for attempt in range(max_retries):
                 try:
@@ -600,196 +828,7 @@ class PDFRAGPipeline:
 # Initialize pipeline
 pipeline = PDFRAGPipeline()
 
-async def rephrase_cached_answers(questions: List[str], cached_answers: List[str], request_start_time: float = None) -> List[str]:
-    """
-    Rephrase cached answers using LLM while maintaining the same meaning.
-    Uses concurrent processing like the original answer_questions method.
-    
-    Args:
-        questions (List[str]): List of questions
-        cached_answers (List[str]): List of cached answers
-        request_start_time (float): Start time for timeout calculation
-        
-    Returns:
-        List[str]: List of rephrased answers
-    """
-    # Initialize answers array with empty strings to match questions length
-    rephrased_answers = [""] * len(questions)
-    
-    # Use request start time if provided, otherwise use current time
-    start_time = request_start_time if request_start_time is not None else time.time()
-    timeout_threshold = 29.0  # 29 seconds threshold (same as original)
-    
-    # Calculate remaining time
-    elapsed_time = time.time() - start_time
-    remaining_time = max(0, timeout_threshold - elapsed_time)
-    
-    if remaining_time <= 0:
-        logger.info(f"⏰ No time remaining for rephrasing ({elapsed_time:.2f}s elapsed). Returning original answers.")
-        return cached_answers
-    
-    # Process questions concurrently like the original method
-    tasks = []
-    for i, (question, cached_answer) in enumerate(zip(questions, cached_answers)):
-        if cached_answer == "":  # Skip empty answers (not found in cache)
-            continue
-        task = asyncio.create_task(_rephrase_single_answer_with_index(i, question, cached_answer, rephrased_answers, start_time, timeout_threshold))
-        tasks.append(task)
-    
-    # Use asyncio.wait_for with timeout to actually interrupt tasks (same as original)
-    if tasks:
-        try:
-            await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=remaining_time)
-            logger.info("✅ All cached answers rephrased within time limit")
-        except asyncio.TimeoutError:
-            logger.warning(f"⏰ Timeout reached for rephrasing ({timeout_threshold:.2f}s). Cancelling remaining tasks.")
-            # Cancel any remaining tasks
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            # Wait a bit for cancellations to take effect
-            await asyncio.sleep(0.1)
-    
-    return rephrased_answers
 
-async def _rephrase_single_answer_with_index(index: int, question: str, cached_answer: str, rephrased_answers: List[str], start_time: float, timeout_threshold: float):
-    """Rephrase a single cached answer and update the answers list at the specified index."""
-    try:
-        # Check if we're approaching the timeout (same as original)
-        elapsed_time = time.time() - start_time
-        if elapsed_time >= timeout_threshold:
-            logger.info(f"⏰ Timeout threshold reached ({elapsed_time:.2f}s). Skipping rephrasing for question {index + 1}")
-            rephrased_answers[index] = cached_answer  # Use original answer
-            return
-        
-        logger.info(f"🔄 Rephrasing cached answer for question {index + 1}")
-        
-        # Create prompt for rephrasing
-        rephrase_prompt = f"""Please rephrase the following answer while maintaining its exact meaning and accuracy. 
-        Keep the same level of detail and information, but use different wording and sentence structure.
-	Not to check the factual accuracy of the answer. The facts in the answer are correct and accurate.
-	Don't try to fix mathematical original answer according to the question.
-        
-        IMPORTANT: Respond with ONLY the rephrased answer text. Do not include any labels, prefixes, or additional text like "Rephrased Answer:" or "Here's the rephrased version:". Just provide the rephrased statement directly.
-
-        Question: {question}
-        
-        Original Answer: {cached_answer}"""
-        
-        # Log the final prompt being sent to LLM for rephrasing
-        logger.info(f"🤖 FINAL PROMPT FOR REPHRASING (Question {index + 1}):")
-        logger.info(f"System: You are a helpful assistant that rephrases text while maintaining exact meaning and accuracy. Do not add, remove, or change any factual information. IMPORTANT: Always respond with ONLY the rephrased text, no labels, prefixes, or additional formatting.")
-        logger.info(f"User: {rephrase_prompt}")
-        
-        # Check for cancellation before LLM call (same as original)
-        if asyncio.current_task().cancelled():
-            logger.info(f"🛑 Rephrasing for question {index + 1} cancelled before LLM call")
-            rephrased_answers[index] = cached_answer
-            return
-        
-        # Use the same LLM as the main pipeline
-        response = await pipeline.openrouter_llm.ainvoke([
-            {"role": "system", "content": "You are a helpful assistant that rephrases text while maintaining exact meaning and accuracy. Do not add, remove, or change any factual information. IMPORTANT: Always respond with ONLY the rephrased text, no labels, prefixes, or additional formatting."},
-            {"role": "user", "content": rephrase_prompt}
-        ])
-        
-        
-        rephrased_answer = response.content.strip()
-        rephrased_answers[index] = rephrased_answer
-        logger.info(f"✅ Rephrased answer for question {index + 1}")
-        
-    except Exception as e:
-        logger.error(f"❌ Error rephrasing answer for question {index + 1}: {str(e)}")
-        # Fallback to original answer if rephrasing fails
-        rephrased_answers[index] = cached_answer
-
-async def check_mongodb_for_answers(file_hash: str, questions: List[str]) -> List[str]:
-    """
-    Check MongoDB for existing answers for the given file hash and questions.
-    Returns answers for questions that are found, empty strings for those not found.
-    
-    Args:
-        file_hash (str): Hash of the file URL
-        questions (List[str]): List of questions to check
-        
-    Returns:
-        List[str]: List of answers (empty string if question not found), None if no document exists
-    """
-    try:
-        # MongoDB connection configuration
-        mongo_username = os.getenv("MONGO_USERNAME", "ansh")
-        mongo_password = os.getenv("MONGO_PASSWORD", "jaiswal")
-        mongo_db_name = os.getenv("MONGO_DB_NAME", "HackRX")
-        mongo_host = os.getenv("MONGO_HOST", "127.0.0.1")
-        mongo_port = int(os.getenv("MONGO_PORT", "27017"))
-        
-        # Create MongoDB connection string
-        connection_string = f"mongodb://{mongo_host}:{mongo_port}/{mongo_db_name}?retryWrites=true"
-        
-        client = None
-        try:
-            # Connect to MongoDB
-            client = MongoClient(connection_string)
-            
-            # Test the connection
-            client.admin.command('ping')
-            
-            # Get database and collection
-            db = client[mongo_db_name]
-            collection = db["qa_pairs"]
-            
-            # Find the document with the given file hash
-            document = collection.find_one({"_id": file_hash})
-            
-            if not document:
-                logger.info(f"❌ No document found in MongoDB for hash: {file_hash}")
-                return None
-            
-            # Check if all questions exist in the document
-            stored_answers = document.get("answers", [])
-            stored_question_hashes = document.get("question_hashes", [])
-            
-            if len(stored_question_hashes) != len(stored_answers):
-                logger.warning(f"⚠️ Mismatch in question_hashes/answers count for hash: {file_hash}")
-                return None
-            
-            # Create a mapping of question hashes to answers for fast lookup
-            qa_mapping = dict(zip(stored_question_hashes, stored_answers))
-            
-            # Check each question individually and build answers list
-            answers = []
-            found_count = 0
-            
-            for i, question in enumerate(questions):
-                question_hash = hash_question(question)
-                
-                # Use hash lookup only
-                if question_hash in qa_mapping:
-                    answers.append(qa_mapping[question_hash])
-                    found_count += 1
-                    logger.info(f"✅ Question {i+1} found in cache: {question[:50]}...")
-                else:
-                    answers.append("")  # Empty string for questions not found
-                    logger.info(f"❌ Question {i+1} not found in cache: {question[:50]}...")
-            
-            if found_count > 0:
-                logger.info(f"✅ Found {found_count}/{len(questions)} questions in MongoDB cache")
-                return answers
-            else:
-                logger.info("❌ No questions found in cache")
-                return None
-                
-        except Exception as e:
-            logger.error(f"❌ MongoDB connection error while checking cache: {str(e)}")
-            return None
-        finally:
-            # Always close the MongoDB connection
-            if client:
-                client.close()
-                
-    except Exception as e:
-        logger.error(f"❌ Error checking MongoDB cache: {str(e)}")
-        return None
 
 @app.post("/api/v1/hackrx/run", response_model=AnswerResponse)
 async def process_questions(
@@ -866,90 +905,52 @@ async def process_questions(
                 logger.error(f"❌ Error processing Azure blob URL: {str(e)}")
                 return AnswerResponse(answers=[f"Error processing URL: {str(e)}"] * len(request.questions))
         
-        # First, check if answers already exist in MongoDB
-        logger.info("🔍 Checking MongoDB for existing QA data...")
-        cached_answers = await check_mongodb_for_answers(file_hash, request.questions)
+        # Process all questions - no MongoDB caching
+        questions_to_process_list = request.questions
+        final_answers = [""] * len(request.questions)
+            
+        # Check if this is a PDF/DOCX or other document type
+        is_pdf_docx = is_pdf_or_docx(str(request.documents))
+        logger.info(f"📄 Document type detection: {'PDF/DOCX' if is_pdf_docx else 'Other (XLSX/PPTX/Image/etc)'}")
         
-        if cached_answers is None:
-            logger.info("❌ No document found in MongoDB, proceeding with full PDF processing...")
-            # No document exists, process all questions
-            questions_to_process = [(i, q) for i, q in enumerate(request.questions)]
-            final_answers = [""] * len(request.questions)
-        else:
-            # Document exists, check which questions need processing
-            questions_to_process = []
-            final_answers = cached_answers.copy()
+        if is_pdf_docx:
+            # Handle PDF/DOCX with chunking, embedding, and retrieval
+            pkl_path = os.path.join(pipeline.embeddings_dir, f"{file_hash}.pkl")
+            logger.info(f"📁 Checking cache at: {pkl_path}")
             
-            for i, (question, cached_answer) in enumerate(zip(request.questions, cached_answers)):
-                if cached_answer == "":  # Question not found in cache
-                    questions_to_process.append((i, question))
-            
-            if not questions_to_process:
-                logger.info("✅ All questions found in MongoDB cache")
-                # Don't return immediately - continue to apply minimum response time
+            # Optimization: Check if hash is already processed before downloading
+            if file_hash in pipeline.processed_hashes and os.path.exists(pkl_path):
+                logger.info(f"⚡ Cache hit for document hash: {file_hash}. Using cached embeddings, skipping download and processing.")
+                with open(pkl_path, "rb") as f:
+                    process_result = pickle.load(f)
+                logger.info("✅ Loaded cached embeddings successfully")
             else:
-                logger.info(f"🔄 Found {len(cached_answers) - len(questions_to_process)}/{len(request.questions)} questions in cache, processing {len(questions_to_process)} remaining questions...")
-        
-        # Rephrase cached answers using LLM - DISABLED
-        if cached_answers is not None:
-            logger.info("🔄 Rephrasing disabled - using original cached answers...")
-            final_answers = cached_answers
-        
-        # Process remaining questions that weren't found in cache
-        if questions_to_process:
-            # Extract just the questions (without indices) for processing
-            questions_to_process_list = [q for _, q in questions_to_process]
-            question_indices = [i for i, _ in questions_to_process]
+                logger.info("🔄 Cache miss - Processing PDF/DOCX through pipeline...")
+                process_result = await pipeline.process_pdf(file_link=str(request.documents))
+                logger.info("✅ PDF/DOCX processing completed")
             
-            # Check if this is a PDF/DOCX or other document type
-            is_pdf_docx = is_pdf_or_docx(str(request.documents))
-            logger.info(f"📄 Document type detection: {'PDF/DOCX' if is_pdf_docx else 'Other (XLSX/PPTX/Image/etc)'}")
+            # Answer all questions using enhanced division-based retrieval
+            logger.info(f"🤖 Answering {len(questions_to_process_list)} questions with enhanced division-based retrieval...")
+            final_answers = await pipeline.answer_questions_with_division(questions_to_process_list, llm_provider="groq", file_hash=file_hash, request_start_time=request_start_time)
             
-            if is_pdf_docx:
-                # Handle PDF/DOCX with chunking, embedding, and retrieval
-                pkl_path = os.path.join(pipeline.embeddings_dir, f"{file_hash}.pkl")
-                logger.info(f"📁 Checking cache at: {pkl_path}")
-                
-                # Optimization: Check if hash is already processed before downloading
-                if file_hash in pipeline.processed_hashes and os.path.exists(pkl_path):
-                    logger.info(f"⚡ Cache hit for document hash: {file_hash}. Using cached embeddings, skipping download and processing.")
-                    with open(pkl_path, "rb") as f:
-                        process_result = pickle.load(f)
-                    logger.info("✅ Loaded cached embeddings successfully")
-                else:
-                    logger.info("🔄 Cache miss - Processing PDF/DOCX through pipeline...")
-                    process_result = await pipeline.process_pdf(file_link=str(request.documents))
-                    logger.info("✅ PDF/DOCX processing completed")
-                
-                # Answer only the remaining questions using Groq with timer-based cutoff
-                logger.info(f"🤖 Answering {len(questions_to_process_list)} remaining questions with Groq (timer-based)...")
-                processed_answers = await pipeline.answer_questions(questions_to_process_list, llm_provider="groq", file_hash=file_hash, request_start_time=request_start_time)
-                
-                # Cleanup vector store
-                import shutil
-                if os.path.exists(pipeline.vector_store_path):
-                    shutil.rmtree(pipeline.vector_store_path)
-            else:
-                # Handle other document types (XLSX, PPTX, Images, etc.) with simple context
-                logger.info("🔄 Processing non-PDF/DOCX document with simple context...")
-                process_result = await pipeline.process_other_document(file_link=str(request.documents))
-                logger.info("✅ Document processing completed")
-                
-                # Answer questions using simple context (no similarity scores)
-                logger.info(f"🤖 Answering {len(questions_to_process_list)} questions with simple context...")
-                processed_answers = await pipeline.answer_questions_simple_context(
-                    questions_to_process_list, 
-                    process_result["full_context"], 
-                    llm_provider="groq", 
-                    request_start_time=request_start_time
-                )
-            
-            # Update final_answers with the processed results
-            for idx, answer in zip(question_indices, processed_answers):
-                final_answers[idx] = answer
+            # Cleanup vector store
+            import shutil
+            if os.path.exists(pipeline.vector_store_path):
+                shutil.rmtree(pipeline.vector_store_path)
         else:
-            # All questions were found in cache, no processing needed
-            logger.info("✅ All questions found in cache, no processing required")
+            # Handle other document types (XLSX, PPTX, Images, etc.) with simple context
+            logger.info("🔄 Processing non-PDF/DOCX document with simple context...")
+            process_result = await pipeline.process_other_document(file_link=str(request.documents))
+            logger.info("✅ Document processing completed")
+            
+            # Answer questions using simple context (no similarity scores)
+            logger.info(f"🤖 Answering {len(questions_to_process_list)} questions with simple context...")
+            final_answers = await pipeline.answer_questions_simple_context(
+                questions_to_process_list, 
+                process_result["full_context"], 
+                llm_provider="groq", 
+                request_start_time=request_start_time
+            )
         
         # Calculate minimum response time based on total questions
         total_questions = len(request.questions)
@@ -995,312 +996,34 @@ async def process_questions(
             detail=f"Internal server error: {str(e)}"
         )
 
-@app.post("/api/v1/hackrx/save-qa", response_model=QASaveResponse)
-async def save_qa_to_mongodb(
-    request: QASaveRequest,
+
+@app.post("/api/v1/divide_question", response_model=DivideQuestionResponse)
+async def divide_question(
+    request: DivideQuestionRequest,
     api_key: str = Depends(verify_api_key)
 ):
     """
-    Save question-answer pairs to MongoDB with file URL hash as document ID
+    Divide a broad question into atomic sub-questions using LLM
     
-    - **url**: URL of the PDF document
-    - **questions**: List of questions
-    - **answers**: List of corresponding answers
+    - **questions**: List of questions to divide
     """
     try:
-        logger.info(f"💾 Saving QA data for URL: {request.url}")
+        logger.info(f"🔀 Dividing {len(request.questions)} questions...")
         
-        # Generate hash of the file URL (same as used in the main endpoint)
-        file_hash = hash_filelink(str(request.url))
-        logger.info(f"🔗 Generated file hash: {file_hash}")
+        # Use the pipeline to divide questions
+        divided_questions = await pipeline.divide_questions(request.questions, llm_provider="groq")
         
-        # Validate that questions and answers have the same length
-        if len(request.questions) != len(request.answers):
-            raise HTTPException(
-                status_code=400,
-                detail="Number of questions and answers must be equal"
-            )
+        logger.info(f"📤 Divided questions: {divided_questions}")
         
-        # Generate question hashes for storage
-        question_hashes = [hash_question(q) for q in request.questions]
-        logger.info(f"🔐 Generated {len(question_hashes)} question hashes for storage")
+        return DivideQuestionResponse(divided_questions=divided_questions)
         
-        # Check if document already exists
-        existing_document = None
-        try:
-            # Connect to MongoDB to check for existing document
-            mongo_username = os.getenv("MONGO_USERNAME", "ansh")
-            mongo_password = os.getenv("MONGO_PASSWORD", "jaiswal")
-            mongo_db_name = os.getenv("MONGO_DB_NAME", "HackRX")
-            mongo_host = os.getenv("MONGO_HOST", "127.0.0.1")
-            mongo_port = int(os.getenv("MONGO_PORT", "27017"))
-            connection_string = f"mongodb://{mongo_host}:{mongo_port}/{mongo_db_name}?retryWrites=true"
-            
-            client = MongoClient(connection_string)
-            client.admin.command('ping')
-            db = client[mongo_db_name]
-            collection = db["qa_pairs"]
-            
-            existing_document = collection.find_one({"_id": file_hash})
-            client.close()
-        except Exception as e:
-            logger.warning(f"⚠️ Could not check for existing document: {str(e)}")
-        
-        if existing_document:
-            logger.info(f"📄 Found existing document for hash: {file_hash}")
-            
-            # Get existing data
-            existing_answers = existing_document.get("answers", [])
-            existing_question_hashes = existing_document.get("question_hashes", [])
-            existing_created_at = existing_document.get("created_at", time.time())
-            
-            # Create sets for efficient lookup
-            existing_hash_set = set(existing_question_hashes)
-            
-            # Find new questions (not already in existing data)
-            new_answers = []
-            new_question_hashes = []
-            new_questions_count = 0
-            
-            for i, (question, answer, question_hash) in enumerate(zip(request.questions, request.answers, question_hashes)):
-                if question_hash not in existing_hash_set:
-                    new_answers.append(answer)
-                    new_question_hashes.append(question_hash)
-                    new_questions_count += 1
-                    logger.info(f"➕ Adding new question {i+1}: {question[:50]}...")
-                else:
-                    logger.info(f"⏭️ Skipping duplicate question {i+1}: {question[:50]}...")
-            
-            if new_questions_count == 0:
-                logger.info("ℹ️ All questions already exist in the document")
-                return QASaveResponse(
-                    success=True,
-                    message="All questions already exist in the document",
-                    document_id=file_hash
-                )
-            
-            # Merge existing and new data
-            merged_answers = existing_answers + new_answers
-            merged_question_hashes = existing_question_hashes + new_question_hashes
-            
-            logger.info(f"🔄 Merging {len(existing_answers)} existing answers with {new_questions_count} new answers")
-            
-            # Create merged document
-            qa_document = {
-                "_id": file_hash,
-                "url": str(request.url),
-                "answers": merged_answers,
-                "question_hashes": merged_question_hashes,
-                "created_at": existing_created_at,  # Preserve original creation time
-                "updated_at": time.time(),  # Add update timestamp
-                "question_count": len(merged_answers)
-            }
-        else:
-            logger.info(f"🆕 Creating new document for hash: {file_hash}")
-            
-            # Create new document
-            qa_document = {
-                "_id": file_hash,
-                "url": str(request.url),
-                "answers": request.answers,
-                "question_hashes": question_hashes,
-                "created_at": time.time(),
-                "question_count": len(request.questions)
-            }
-        
-        # Save the document to MongoDB
-        try:
-            # Connect to MongoDB (reuse connection details)
-            client = MongoClient(connection_string)
-            
-            # Test the connection
-            client.admin.command('ping')
-            
-            # Get database and collection
-            db = client[mongo_db_name]
-            collection = db["qa_pairs"]
-            
-            # Use upsert to either insert new document or update existing one
-            result = collection.replace_one(
-                {"_id": file_hash},
-                qa_document,
-                upsert=True
-            )
-            
-            if result.acknowledged:
-                logger.info(f"✅ Successfully saved QA data with ID: {file_hash}")
-                return QASaveResponse(
-                    success=True,
-                    message="Question-answer pairs saved successfully",
-                    document_id=file_hash
-                )
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Failed to save data to MongoDB"
-                )
-                
-        except Exception as e:
-            logger.error(f"❌ MongoDB connection error: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to connect to MongoDB: {str(e)}"
-            )
-        finally:
-            # Always close the MongoDB connection
-            if 'client' in locals():
-                client.close()
-            
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"❌ Error saving QA data: {str(e)}")
+        logger.error(f"❌ Error in divide_question endpoint: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
 
-@app.get("/api/v1/hackrx/get-cached-answers")
-async def get_cached_answers(
-    url: str,
-    questions: str,  # Comma-separated questions
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Get cached answers for specific questions from MongoDB
-    
-    - **url**: URL of the PDF document
-    - **questions**: Comma-separated list of questions
-    """
-    try:
-        logger.info(f"🔍 Getting cached answers for URL: {url}")
-        
-        # Parse questions
-        question_list = [q.strip() for q in questions.split(",") if q.strip()]
-        if not question_list:
-            raise HTTPException(
-                status_code=400,
-                detail="No valid questions provided"
-            )
-        
-        logger.info(f"📝 Questions requested: {question_list}")
-        
-        # Generate hash of the file URL
-        file_hash = hash_filelink(url)
-        logger.info(f"🔗 Generated file hash: {file_hash}")
-        
-        # Check MongoDB for answers
-        cached_answers = await check_mongodb_for_answers(file_hash, question_list)
-        
-        if cached_answers is None:
-            logger.info("❌ No document found in MongoDB")
-            raise HTTPException(
-                status_code=404,
-                detail="No QA data found for this URL"
-            )
-        else:
-            # Check if any answers were found
-            found_answers = [ans for ans in cached_answers if ans != ""]
-            if found_answers:
-                logger.info(f"✅ Returning {len(found_answers)} cached answers")
-                return AnswerResponse(answers=cached_answers)
-            else:
-                logger.info("❌ No cached answers found for the specified questions")
-                raise HTTPException(
-                    status_code=404,
-                    detail="No cached answers found for the specified questions"
-                )
-                
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error getting cached answers: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
-
-@app.get("/api/v1/hackrx/check-cache")
-async def check_cache(
-    url: str,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Check if QA data exists in MongoDB for a given URL
-    
-    - **url**: URL of the PDF document to check
-    """
-    try:
-        logger.info(f"🔍 Checking cache for URL: {url}")
-        
-        # Generate hash of the file URL
-        file_hash = hash_filelink(url)
-        logger.info(f"🔗 Generated file hash: {file_hash}")
-        
-        # MongoDB connection configuration
-        mongo_username = os.getenv("MONGO_USERNAME", "ansh")
-        mongo_password = os.getenv("MONGO_PASSWORD", "jaiswal")
-        mongo_db_name = os.getenv("MONGO_DB_NAME", "HackRX")
-        mongo_host = os.getenv("MONGO_HOST", "127.0.0.1")
-        mongo_port = int(os.getenv("MONGO_PORT", "27017"))
-        
-        # Create MongoDB connection string
-        connection_string = f"mongodb://{mongo_host}:{mongo_port}/{mongo_db_name}?retryWrites=true"
-        
-        client = None
-        try:
-            # Connect to MongoDB
-            client = MongoClient(connection_string)
-            
-            # Test the connection
-            client.admin.command('ping')
-            
-            # Get database and collection
-            db = client[mongo_db_name]
-            collection = db["qa_pairs"]
-            
-            # Find the document with the given file hash
-            document = collection.find_one({"_id": file_hash})
-            
-            if document:
-                stored_questions = document.get("questions", [])
-                stored_answers = document.get("answers", [])
-                created_at = document.get("created_at", 0)
-                
-                return {
-                    "exists": True,
-                    "file_hash": file_hash,
-                    "question_count": len(stored_questions),
-                    "answer_count": len(stored_answers),
-                    "created_at": created_at,
-                    "questions": stored_questions
-                }
-            else:
-                return {
-                    "exists": False,
-                    "file_hash": file_hash,
-                    "message": "No QA data found for this URL"
-                }
-                
-        except Exception as e:
-            logger.error(f"❌ MongoDB connection error: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to connect to MongoDB: {str(e)}"
-            )
-        finally:
-            # Always close the MongoDB connection
-            if client:
-                client.close()
-                
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error checking cache: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
 
 @app.get("/health")
 async def health_check():

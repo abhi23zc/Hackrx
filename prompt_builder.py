@@ -1,14 +1,15 @@
-from retriever_reranker import rerank_chunks, retrieve_top_k
+# Remove the incorrect import - these functions don't exist in a separate module
+# from retriever_reranker import rerank_chunks, retrieve_top_k
 
 
-def build_prompt_with_sources(query, context_chunks, max_chars=4000):
+def build_prompt_with_sources(query, context_chunks, max_chars=None):
     """
     Builds an efficient prompt with source-attributed context.
 
     Args:
         query (str): User question
         context_chunks (list): List of dicts with 'text' and 'page'
-        max_chars (int): Max allowed characters for context (e.g., 4000 for GPT)
+        max_chars (int): Max allowed characters for context (removed limit for pro API)
 
     Returns:
         prompt (str): Final prompt string for LLM
@@ -36,9 +37,6 @@ def build_prompt_with_sources(query, context_chunks, max_chars=4000):
         text = chunk["text"].strip().replace("\n", " ")
         source_block = f"(Page {page}) {text}\n\n"
         block_len = len(source_block)
-
-        if total_chars + block_len > max_chars:
-            break
 
         context_str += source_block
         used_sources.append(chunk)
