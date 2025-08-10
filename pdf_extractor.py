@@ -81,25 +81,7 @@ async def extract_pdf_content(url: str):
         response.raise_for_status()
         content = response.text
         
-        # Check if this is a hackrx.in URL that returns HTML with a token
-        if "hackrx.in" in url and "id=\"token\"" in content:
-            # Extract token from HTML using string manipulation
-            try:
-                # Find the token div
-                token_start = content.find('<div id="token">')
-                if token_start != -1:
-                    # Find the start of the token value
-                    token_value_start = token_start + len('<div id="token">')
-                    # Find the end of the token div
-                    token_end = content.find('</div>', token_value_start)
-                    if token_end != -1:
-                        # Extract the token
-                        token = content[token_value_start:token_end].strip()
-                        return {"pages": [{"page": 1, "text": token}]}
-            except Exception as e:
-                print(f"Error extracting token from hackrx.in URL: {e}")
-        
-        # Return the full content for other URLs without extensions
+        # Return the full HTML content for all URLs without extensions
         return {"pages": [{"page": 1, "text": content}]}
 
     if ext == ".pdf":
