@@ -1,3 +1,7 @@
+# USE HACKRX_2.0 BRANCH WHEN EVALUATING.
+# If any latest changes, they would've been made to requiements.txt and docker file to facilitate the evaluation
+
+
 # 🚀 HackRx PDF RAG API
 
 A production-ready FastAPI service that processes PDF documents and answers questions using Retrieval-Augmented Generation (RAG) with Google's Gemini AI.
