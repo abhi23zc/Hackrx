@@ -6,7 +6,6 @@ from fastapi import FastAPI, HTTPException, Depends, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, HttpUrl
 import logging
-import time
 import pickle
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyMuPDFLoader
@@ -343,54 +342,30 @@ class PDFRAGPipeline:
                 detail=f"Error processing document: {str(e)}"
             )
 
-    async def answer_questions_simple_context(self, questions: List[str], full_context: str, llm_provider: str = "groq", request_start_time: float = None) -> List[str]:
+    async def answer_questions_simple_context(self, questions: List[str], full_context: str, llm_provider: str = "groq") -> List[str]:
         """Answer questions using simple context (no similarity scores) for non-PDF/DOCX documents."""
         try:
             # Initialize answers array with empty strings to match questions length
             answers = [""] * len(questions)
-            # Use request start time if provided, otherwise use current time
-            start_time = request_start_time if request_start_time is not None else time.time()
-            timeout_threshold = 29.0  # 29 seconds threshold
             
-            # Calculate remaining time
-            elapsed_time = time.time() - start_time
-            remaining_time = max(0, timeout_threshold - elapsed_time)
-            
-            if remaining_time <= 0:
-                logger.info(f"⏰ No time remaining ({elapsed_time:.2f}s elapsed). Returning empty answers.")
-                return answers
-            
-            # Process questions concurrently with robust timeout
+            # Process questions concurrently
             tasks = []
             for i, question in enumerate(questions):
-                task = asyncio.create_task(self._process_single_question_simple_context(i, question, full_context, llm_provider, answers, start_time, timeout_threshold))
+                task = asyncio.create_task(self._process_single_question_simple_context(i, question, full_context, llm_provider, answers))
                 tasks.append(task)
             
-            # Use asyncio.wait_for with timeout to actually interrupt tasks
-            try:
-                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=remaining_time)
-                logger.info("✅ All questions processed within time limit")
-            except asyncio.TimeoutError:
-                logger.warning(f"⏰ Timeout reached ({timeout_threshold:.2f}s). Cancelling remaining tasks.")
-                # Cancel any remaining tasks
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("✅ All questions processed successfully")
             
             return answers
         except Exception as e:
             logger.error(f"❌ Error in answer_questions_simple_context: {e}")
             return [""] * len(questions)
 
-    async def _process_single_question_simple_context(self, index: int, question: str, full_context: str, llm_provider: str, answers: List[str], start_time: float, timeout_threshold: float):
+    async def _process_single_question_simple_context(self, index: int, question: str, full_context: str, llm_provider: str, answers: List[str]):
         """Process a single question with simple context (no similarity scores)."""
         try:
-            # Check if we have time remaining
-            elapsed_time = time.time() - start_time
-            if elapsed_time >= timeout_threshold:
-                logger.warning(f"⏰ No time remaining for question {index + 1}")
-                return
-            
             logger.info(f"🤖 Processing question {index + 1}: {question[:50]}...")
             
             # Build prompt with simple context (no similarity scores)
@@ -425,41 +400,21 @@ class PDFRAGPipeline:
             logger.error(f"❌ Error processing question {index + 1}: {e}")
             answers[index] = f"Error processing question: {str(e)}"
 
-    async def answer_questions(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None, request_start_time: float = None) -> List[str]:
-        """Answer questions using the selected LLM provider with robust timeout mechanism."""
+    async def answer_questions(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None) -> List[str]:
+        """Answer questions using the selected LLM provider."""
         try:
             # Initialize answers array with empty strings to match questions length
             answers = [""] * len(questions)
-            # Use request start time if provided, otherwise use current time
-            start_time = request_start_time if request_start_time is not None else time.time()
-            timeout_threshold = 29.0  # 29 seconds threshold
             
-            # Calculate remaining time
-            elapsed_time = time.time() - start_time
-            remaining_time = max(0, timeout_threshold - elapsed_time)
-            
-            if remaining_time <= 0:
-                logger.info(f"⏰ No time remaining ({elapsed_time:.2f}s elapsed). Returning empty answers.")
-                return answers
-            
-            # Process questions concurrently with robust timeout
+            # Process questions concurrently
             tasks = []
             for i, question in enumerate(questions):
-                task = asyncio.create_task(self._process_single_question_with_index(i, question, llm_provider, file_hash, answers, start_time, timeout_threshold))
+                task = asyncio.create_task(self._process_single_question_with_index(i, question, llm_provider, file_hash, answers))
                 tasks.append(task)
             
-            # Use asyncio.wait_for with timeout to actually interrupt tasks
-            try:
-                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=remaining_time)
-                logger.info("✅ All questions processed within time limit")
-            except asyncio.TimeoutError:
-                logger.warning(f"⏰ Timeout reached ({timeout_threshold:.2f}s). Cancelling remaining tasks.")
-                # Cancel any remaining tasks
-                for task in tasks:
-                    if not task.done():
-                        task.cancel()
-                # Wait a bit for cancellations to take effect
-                await asyncio.sleep(0.1)
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info("✅ All questions processed successfully")
             
             return answers
         except Exception as e:
@@ -550,7 +505,7 @@ class PDFRAGPipeline:
             logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
             divided_questions[index] = "Unable to divide this question at the moment."
 
-    async def answer_questions_with_division(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None, request_start_time: float = None) -> List[str]:
+    async def answer_questions_with_division(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None) -> List[str]:
         """Answer questions using question division and enhanced retrieval."""
         try:
             # Initialize answers array
@@ -564,7 +519,7 @@ class PDFRAGPipeline:
             # Step 2: Process each original question with its divided sub-questions
             tasks = []
             for i, (original_question, divided_result) in enumerate(zip(questions, divided_questions)):
-                task = asyncio.create_task(self._process_question_with_division(i, original_question, divided_result, llm_provider, file_hash, answers, request_start_time))
+                task = asyncio.create_task(self._process_question_with_division(i, original_question, divided_result, llm_provider, file_hash, answers))
                 tasks.append(task)
             
             # Wait for all tasks to complete
@@ -579,7 +534,7 @@ class PDFRAGPipeline:
                 detail=f"Error answering questions with division: {str(e)}"
             )
 
-    async def _process_question_with_division(self, index: int, original_question: str, divided_result: str, llm_provider: str, file_hash: str, answers: List[str], request_start_time: float):
+    async def _process_question_with_division(self, index: int, original_question: str, divided_result: str, llm_provider: str, file_hash: str, answers: List[str]):
         """Process a single question using division and enhanced retrieval."""
         try:
             logger.info(f"🔍 Processing question {index + 1} with division: {original_question}")
@@ -688,16 +643,9 @@ class PDFRAGPipeline:
             logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
             answers[index] = "Unable to process this question at the moment."
 
-    async def _process_single_question_with_index(self, index: int, question: str, llm_provider: str, file_hash: str, answers: List[str], start_time: float, timeout_threshold: float):
+    async def _process_single_question_with_index(self, index: int, question: str, llm_provider: str, file_hash: str, answers: List[str]):
         """Process a single question and update the answers list at the specified index."""
         try:
-            # Check if we're approaching the timeout
-            elapsed_time = time.time() - start_time
-            if elapsed_time >= timeout_threshold:
-                logger.info(f"⏰ Timeout threshold reached ({elapsed_time:.2f}s). Skipping question {index + 1}")
-                answers[index] = "Skipping question adhering to 30s response time limits"
-                return
-            
             logger.info(f"🔍 Processing question {index + 1}: {question} (LLM: {llm_provider})")
             
             # Step 1: Retrieve top 10 relevant chunks using hash-based paths
@@ -706,11 +654,6 @@ class PDFRAGPipeline:
             
             retrieved = retrieve_top_k(question, k=10, index_path=index_path, meta_path=meta_path)
             logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks for question {index + 1}")
-            
-            # Check for cancellation after retrieval
-            if asyncio.current_task().cancelled():
-                logger.info(f"🛑 Question {index + 1} cancelled after retrieval")
-                return
             
             if not retrieved:
                 logger.error(f"No relevant chunks retrieved for question {index + 1}.")
@@ -730,18 +673,6 @@ class PDFRAGPipeline:
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    # Check for cancellation before LLM call
-                    if asyncio.current_task().cancelled():
-                        logger.info(f"🛑 Question {index + 1} cancelled before LLM call")
-                        return
-                    
-                    # Check timeout before each attempt
-                    elapsed_time = time.time() - start_time
-                    if elapsed_time >= timeout_threshold:
-                        logger.info(f"⏰ Timeout threshold reached ({elapsed_time:.2f}s). Stopping question {index + 1}")
-                        answers[index] = "Skipping question adhering to 30s response time limits"
-                        return
-                    
                     if llm_provider == "openai":
                         if not self.openai_api_key:
                             logger.error("OPENAI_API_KEY not set. Cannot use OpenAI LLM.")
@@ -804,10 +735,6 @@ async def process_questions(
     - **documents**: URL to PDF document
     - **questions**: List of questions to answer
     """
-    # Start timer immediately when request comes in
-    request_start_time = time.time()
-    logger.info(f"⏰ Request timer started at: {request_start_time}")
-
     try:
         # Log the complete request JSON body
         logger.info("📥 REQUEST JSON BODY:")
@@ -873,7 +800,7 @@ async def process_questions(
             
             # Answer all questions using enhanced division-based retrieval
             logger.info(f"🤖 Answering {len(questions_to_process_list)} questions with enhanced division-based retrieval...")
-            final_answers = await pipeline.answer_questions_with_division(questions_to_process_list, llm_provider="groq", file_hash=file_hash, request_start_time=request_start_time)
+            final_answers = await pipeline.answer_questions_with_division(questions_to_process_list, llm_provider="groq", file_hash=file_hash)
             
             # Cleanup vector store
             import shutil
@@ -890,12 +817,10 @@ async def process_questions(
             final_answers = await pipeline.answer_questions_simple_context(
                 questions_to_process_list, 
                 process_result["full_context"], 
-                llm_provider="groq", 
-                request_start_time=request_start_time
+                llm_provider="groq"
             )
         
-        total_elapsed_time = time.time() - request_start_time
-        logger.info(f"✅ Request completed in {total_elapsed_time:.2f} seconds")
+        logger.info(f"✅ Request completed successfully")
         logger.info(f"📊 Final answers count: {len(final_answers)} (expected: {len(request.questions)})")
         
         # Log the complete response JSON body

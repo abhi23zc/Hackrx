@@ -4,6 +4,7 @@ from langchain_community.document_loaders import (
     UnstructuredEmailLoader
 )
 import os
+import sys
 import asyncio
 import json
 from urllib.parse import urlparse
@@ -15,7 +16,6 @@ import pandas as pd
 from pptx import Presentation
 import requests
 import openai
-import os
 import re
 import logging
 from typing import Optional
@@ -24,12 +24,31 @@ from typing import Optional
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Set Tesseract path to the working installation for cross-platform support
+def configure_tesseract_path():
+    """
+    Set pytesseract.pytesseract.tesseract_cmd if needed, depending on OS and environment.
+    - On Windows, try to set a default path if TESSERACT_PATH env var is not set.
+    - On Mac/Linux, rely on tesseract being in PATH, but allow override via TESSERACT_PATH.
+    """
+    tesseract_env_path = os.getenv("TESSERACT_PATH")
+    if tesseract_env_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_env_path
+        logger.info(f"Using Tesseract from TESSERACT_PATH: {tesseract_env_path}")
+    elif sys.platform.startswith("win"):
+        # Try to use a common Windows install path if not set
+        default_win_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if os.path.exists(default_win_path):
+            pytesseract.pytesseract.tesseract_cmd = default_win_path
+            logger.info(f"Using Tesseract from default Windows path: {default_win_path}")
+        else:
+            # Fallback to whatever is in PATH
+            logger.info("Tesseract path not set, relying on PATH for Windows.")
+    else:
+        # On Mac/Linux, rely on tesseract being in PATH
+        logger.info("Tesseract path not set, relying on PATH for Mac/Linux.")
 
-# Set Tesseract path to the working installation
-pytesseract.pytesseract.tesseract_cmd = r'D:\Softwares\Tesseract\tesseract.exe'
-
-
-
+configure_tesseract_path()
 
 async def fetch_image_bytes(url: str) -> bytes:
     """Download image bytes from a URL using aiohttp."""

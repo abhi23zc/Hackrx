@@ -46,13 +46,3 @@ def generate_openai_embeddings(chunks, model_name="text-embedding-3-small", batc
     return texts, np.array(vectors, dtype=np.float32)
 
 
-# from pdf_extractor import extract_pdf_content
-# from chunker import chunk_text
-# # from embedder_miniLM import generate_embeddings
-
-# pdf_data = extract_pdf_content("dataset1.pdf")
-# chunks = chunk_text(pdf_data["pages"])
-# texts, embeddings = generate_embeddings(chunks)
-
-# print("Total chunks:", len(texts))
-# print("Embedding shape:", embeddings.shape)

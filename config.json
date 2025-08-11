@@ -1,0 +1,14 @@
+{
+  "llm": {
+    "openrouter_api_key": "your key"
+  },
+  "processing": {
+    "timeout_threshold": 29.0,
+    "chunk_size": 750,
+    "chunk_overlap": 100,
+    "retrieval_k": 5
+  },
+  "logging": {
+    "level": "INFO"
+  }
+}
