@@ -1,6 +1,6 @@
 {
   "llm": {
-    "openrouter_api_key": "your key"
+    "openrouter_api_key": "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"
   },
   "processing": {
     "timeout_threshold": 29.0,

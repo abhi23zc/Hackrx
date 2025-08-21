@@ -67,34 +67,3 @@ def search(query_embedding, k=5, use_cosine=True, index_path="vector_store/index
 
     distances, indices = index.search(query_embedding, k)
     return indices[0], distances[0]
-
-
-# from embedder import generate_embeddings
-# from pdf_extractor import extract_pdf_content
-# from chunker import chunk_text
-# from faiss_store import create_faiss_index, save_metadata, search, load_metadata
-
-# # Step 1: Load & Process
-# pdf_data = extract_pdf_content("dataset1.pdf")
-# chunks = chunk_text(pdf_data["pages"])
-# texts, embeddings = generate_embeddings(chunks)
-
-# # Step 2: Store
-# create_faiss_index(embeddings)
-# save_metadata(chunks)
-
-# # Step 3: Query
-# from sentence_transformers import SentenceTransformer
-# model = SentenceTransformer("all-MiniLM-L6-v2")
-# query = "Summarize the report findings"
-# query_emb = model.encode([query])
-# indices, scores = search(np.array(query_emb).astype("float32"))
-
-# # Step 4: Retrieve
-# metadata = load_metadata()
-# top_chunks = [metadata[i] for i in indices]
-
-# print("Top Chunks:")
-# for chunk in top_chunks:
-#     print(f"Page {chunk['page']}: {chunk['text'][:200]}...\n")
-

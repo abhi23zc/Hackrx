@@ -24,17 +24,17 @@ from chunker import chunk_text
 from embedder import model, generate_embeddings, generate_openai_embeddings
 from faiss_store import create_faiss_index, save_metadata
 from retriever import retrieve_top_k
-from prompt_builder import build_prompt_without_sources
 import hashlib
 import numpy as np
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
+
+
+
+
 # Load environment variables from .env file
 load_dotenv()
-
-# Remove Google imports
-# import google.generativeai as genai
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -220,10 +220,12 @@ def make_web_request(url: str) -> str:
         return content
     except requests.RequestException as e:
         return f"Error making request to {url}: {str(e)}"
+
+
 class PDFRAGPipeline:
     def __init__(self):
-        self.setup_groq()
-        self.setup_openai()
+        self.setup_openrouter()
+        
         self.vector_store_path = "vector_store"
         self.embeddings_dir = "embeddings"
         os.makedirs(self.embeddings_dir, exist_ok=True)
@@ -234,11 +236,11 @@ class PDFRAGPipeline:
             if fname.endswith('.pkl'):
                 self.processed_hashes.add(fname[:-4])
 
-    def setup_groq(self):
+    def setup_openrouter(self):
         """Configure OpenRouter API with Groq Llama3-70B-instruct"""
         try:
             # Get OpenRouter API key from environment
-            openrouter_api_key = "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"
+            openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
             if not openrouter_api_key:
                 logger.error("OPENROUTER_API_KEY not set in environment. Groq LLM will not work.")
                 raise ValueError("OPENROUTER_API_KEY environment variable is required")
@@ -254,24 +256,6 @@ class PDFRAGPipeline:
         except Exception as e:
             logger.error(f"❌ Failed to configure OpenRouter: {e}")
             raise
-
-    def setup_openai(self):
-        """Configure OpenAI API client (via LangChain)"""
-        try:
-            self.openai_api_key = os.getenv("OPENAI_API_KEY")
-            if not self.openai_api_key:
-                logger.warning("OPENAI_API_KEY not set in environment. OpenAI LLM will not work.")
-            # Optionally, you could instantiate a ChatOpenAI client here if you want to reuse it
-            # self.openai_llm = ChatOpenAI(
-            #     model="gpt-3.5-turbo",
-            #     temperature=0.1,
-            #     max_tokens=1024,
-            #     openai_api_key=self.openai_api_key
-            # )
-        except Exception as e:
-            logger.error(f"❌ Failed to configure OpenAI: {e}")
-            raise
-
 
 
     async def process_pdf(self, file_link: str) -> dict:
@@ -324,7 +308,7 @@ class PDFRAGPipeline:
                 logger.info(f"📊 Single chunk length: {len(chunks[0]['text'])} characters")
             else:
                 logger.info("✂️ Content is large - proceeding with chunking...")
-                chunks = chunk_text(pdf_data["pages"])
+                chunks = chunk_text(pdf_data["pages"], )
                 logger.info(f"✅ Created {len(chunks)} chunks")
                 logger.info(f"📊 Total chunks length: {sum(len(chunk['text']) for chunk in chunks)} characters")
             
@@ -403,88 +387,7 @@ class PDFRAGPipeline:
                 detail=f"Error processing document: {str(e)}"
             )
 
-    async def answer_questions_simple_context(self, questions: List[str], full_context: str, llm_provider: str = "groq") -> List[str]:
-        """Answer questions using simple context (no similarity scores) for non-PDF/DOCX documents."""
-        try:
-            # Initialize answers array with empty strings to match questions length
-            answers = [""] * len(questions)
-            
-            # Process questions concurrently
-            tasks = []
-            for i, question in enumerate(questions):
-                task = asyncio.create_task(self._process_single_question_simple_context(i, question, full_context, llm_provider, answers))
-                tasks.append(task)
-            
-            # Wait for all tasks to complete
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info("✅ All questions processed successfully")
-            
-            return answers
-        except Exception as e:
-            logger.error(f"❌ Error in answer_questions_simple_context: {e}")
-            return [""] * len(questions)
 
-    async def _process_single_question_simple_context(self, index: int, question: str, full_context: str, llm_provider: str, answers: List[str]):
-        """Process a single question with simple context (no similarity scores)."""
-        try:
-            logger.info(f"🤖 Processing question {index + 1}: {question[:50]}...")
-            
-            # Build prompt with simple context (no similarity scores)
-            # Escape curly braces in context to prevent any template issues
-            escaped_context = escape_curly_braces(full_context)
-            prompt = SIMPLE_SYSTEM_PROMPT + "\n\nContext:\n" + escaped_context + "\n\nQuestion:\n" + question.strip()
-            
-            # Log the final prompt being sent to LLM for simple context processing
-            logger.info(f"🤖 FINAL PROMPT FOR SIMPLE CONTEXT (Question {index + 1}):")
-            logger.info(f"Prompt: {prompt}")
-            
-            # Use the appropriate LLM provider
-            if llm_provider == "groq":
-                llm = self.openrouter_llm
-            elif llm_provider == "openai":
-                llm = ChatOpenAI(
-                    model="gpt-3.5-turbo",
-                    temperature=0.1,
-                    max_tokens=1024,
-                    openai_api_key=self.openai_api_key
-                )
-            else:
-                raise ValueError(f"Unsupported LLM provider: {llm_provider}")
-            
-            # Get response from LLM
-            response = await llm.ainvoke(prompt)
-            answer = response.content.strip()
-            
-            # Store the answer
-            answers[index] = answer
-            logger.info(f"✅ Question {index + 1} answered successfully")
-            
-        except Exception as e:
-            logger.error(f"❌ Error processing question {index + 1}: {e}")
-            answers[index] = f"Error processing question: {str(e)}"
-
-    async def answer_questions(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None) -> List[str]:
-        """Answer questions using the selected LLM provider."""
-        try:
-            # Initialize answers array with empty strings to match questions length
-            answers = [""] * len(questions)
-            
-            # Process questions concurrently
-            tasks = []
-            for i, question in enumerate(questions):
-                task = asyncio.create_task(self._process_single_question_with_index(i, question, llm_provider, file_hash, answers))
-                tasks.append(task)
-            
-            # Wait for all tasks to complete
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info("✅ All questions processed successfully")
-            
-            return answers
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error answering questions: {str(e)}"
-            )
 
     async def divide_questions(self, questions: List[str], llm_provider: str = "groq") -> List[str]:
         """Divide questions into atomic sub-questions using the selected LLM provider."""
@@ -568,225 +471,6 @@ class PDFRAGPipeline:
             logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
             divided_questions[index] = "Unable to divide this question at the moment."
 
-    async def answer_questions_with_division(self, questions: List[str], llm_provider: str = "groq", file_hash: str = None) -> List[str]:
-        """Answer questions using question division and enhanced retrieval."""
-        try:
-            # Initialize answers array
-            answers = [""] * len(questions)
-            
-            # Step 1: Divide all questions
-            logger.info("🔀 Dividing questions into sub-questions...")
-            divided_questions = await self.divide_questions(questions, llm_provider)
-            logger.info(f"✅ Questions divided: {divided_questions}")
-            
-            # Step 2: Process each original question with its divided sub-questions
-            tasks = []
-            for i, (original_question, divided_result) in enumerate(zip(questions, divided_questions)):
-                task = asyncio.create_task(self._process_question_with_division(i, original_question, divided_result, llm_provider, file_hash, answers))
-                tasks.append(task)
-            
-            # Wait for all tasks to complete
-            await asyncio.gather(*tasks, return_exceptions=True)
-            
-            logger.info("✅ All questions processed with division")
-            return answers
-            
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error answering questions with division: {str(e)}"
-            )
-
-    async def _process_question_with_division(self, index: int, original_question: str, divided_result: str, llm_provider: str, file_hash: str, answers: List[str]):
-        """Process a single question using division and enhanced retrieval."""
-        try:
-            logger.info(f"🔍 Processing question {index + 1} with division: {original_question}")
-            
-            # Step 1: Parse divided questions by comma delimiter
-            sub_questions = [q.strip() for q in divided_result.split(';') if q.strip()]
-            logger.info(f"📝 Sub-questions for question {index + 1}: {sub_questions}")
-            
-            # Step 2: If no division was done (single question), use 10 chunks
-            if len(sub_questions) == 1:
-                logger.info(f"🔄 No division detected for question {index + 1}, using 10 chunks")
-                index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
-                meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
-                
-                retrieved = retrieve_top_k(original_question, k=5, index_path=index_path, meta_path=meta_path)
-                logger.info(f"✅ Retrieved {len(retrieved)} chunks for undivided question {index + 1}")
-                
-                # Build prompt with 10 chunks
-                prompt = build_prompt_without_sources(original_question, retrieved)
-                # Escape curly braces in prompt to prevent any template issues
-                prompt = escape_curly_braces(prompt)
-                system_prompt = GENERAL_SYSTEM_PROMPT
-                
-                # Log the final prompt being sent to LLM for undivided question processing
-                logger.info(f"🤖 FINAL PROMPT FOR UNDIVIDED QUESTION PROCESSING (Question {index + 1}):")
-                logger.info(f"System: {system_prompt}")
-                logger.info(f"User: {prompt}")
-                
-            else:
-                # Step 3: For each sub-question, retrieve 3 chunks
-                all_chunks = []
-                for j, sub_question in enumerate(sub_questions):
-                    logger.info(f"🔍 Retrieving chunks for sub-question {j + 1}: {sub_question}")
-                    
-                    index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
-                    meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
-                    
-                    sub_retrieved = retrieve_top_k(sub_question, k=3, index_path=index_path, meta_path=meta_path)
-                    logger.info(f"✅ Retrieved {len(sub_retrieved)} chunks for sub-question {j + 1}")
-                    
-                    all_chunks.extend(sub_retrieved)
-                
-                # Remove duplicates based on text content
-                unique_chunks = []
-                seen_texts = set()
-                for chunk in all_chunks:
-                    if chunk["text"] not in seen_texts:
-                        unique_chunks.append(chunk)
-                        seen_texts.add(chunk["text"])
-                
-                logger.info(f"🔄 Combined {len(all_chunks)} chunks into {len(unique_chunks)} unique chunks for question {index + 1}")
-                
-                # Build prompt with combined chunks
-                prompt = build_prompt_without_sources(original_question, unique_chunks)
-                # Escape curly braces in prompt to prevent any template issues
-                prompt = escape_curly_braces(prompt)
-                system_prompt = GENERAL_SYSTEM_PROMPT
-            
-            # Log the final prompt being sent to LLM for division-based processing
-            logger.info(f"🤖 FINAL PROMPT FOR DIVISION-BASED PROCESSING (Question {index + 1}):")
-            logger.info(f"System: {system_prompt}")
-            logger.info(f"User: {prompt}")
-            
-            # Step 4: Get answer from LLM
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    if llm_provider == "openai":
-                        if not self.openai_api_key:
-                            logger.error("OPENAI_API_KEY not set. Cannot use OpenAI LLM.")
-                            answers[index] = "OpenAI API key not configured."
-                            return
-                        openai_llm = ChatOpenAI(
-                            model="gpt-4o",
-                            temperature=0.5,
-                            max_tokens=1024,
-                            openai_api_key=self.openai_api_key
-                        )
-                        response = await openai_llm.ainvoke([
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt}
-                        ])
-                        answer = response.content.strip()
-                    else:
-                        response = await self.openrouter_llm.ainvoke([
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt}
-                        ])
-                        answer = response.content.strip()
-                    
-                    # Store the answer
-                    answers[index] = answer
-                    logger.info(f"✅ Generated answer for question {index + 1}")
-                    return
-                    
-                except Exception as e:
-                    if "429" in str(e) or "Too Many Requests" in str(e):
-                        wait_time = min(2 ** attempt, 5)  # Cap wait time at 5 seconds
-                        logger.warning(f"Rate limited by LLM API for question {index + 1}. Retrying in {wait_time} seconds...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        logger.error(f"Error processing question {index + 1}: {str(e)}")
-                        answers[index] = f"Error processing question: {str(e)}"
-                        return
-            else:
-                # If all retries failed
-                answers[index] = "Unable to process this question at the moment."
-                
-        except Exception as e:
-            logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
-            answers[index] = "Unable to process this question at the moment."
-
-    async def _process_single_question_with_index(self, index: int, question: str, llm_provider: str, file_hash: str, answers: List[str]):
-        """Process a single question and update the answers list at the specified index."""
-        try:
-            logger.info(f"🔍 Processing question {index + 1}: {question} (LLM: {llm_provider})")
-            
-            # Step 1: Retrieve top 10 relevant chunks using hash-based paths
-            index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
-            meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
-            
-            retrieved = retrieve_top_k(question, k=10, index_path=index_path, meta_path=meta_path)
-            logger.info(f"✅ Retrieved {len(retrieved)} relevant chunks for question {index + 1}")
-            
-            if not retrieved:
-                logger.error(f"No relevant chunks retrieved for question {index + 1}.")
-                answers[index] = "Information not available in the provided document."
-                return
-            
-            # Step 2: Build optimized prompt with similarity scores (using all 10 chunks)
-            prompt = build_prompt_without_sources(question, retrieved)
-            # Escape curly braces in prompt to prevent any template issues
-            prompt = escape_curly_braces(prompt)
-            system_prompt = GENERAL_SYSTEM_PROMPT
-            
-            # Log the final prompt being sent to LLM for main processing
-            logger.info(f"🤖 FINAL PROMPT FOR MAIN PROCESSING (Question {index + 1}):")
-            logger.info(f"System: {system_prompt}")
-            logger.info(f"User: {prompt}")
-            
-            # Step 3: Get answer from the selected LLM
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    if llm_provider == "openai":
-                        if not self.openai_api_key:
-                            logger.error("OPENAI_API_KEY not set. Cannot use OpenAI LLM.")
-                            answers[index] = "OpenAI API key not configured."
-                            return
-                        openai_llm = ChatOpenAI(
-                            model="gpt-4o",
-                            temperature=0.5,
-                            max_tokens=1024,
-                            openai_api_key=self.openai_api_key
-                        )
-                        response = await openai_llm.ainvoke([
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt}
-                        ])
-                        answer = response.content.strip()
-                    else:
-                        response = await self.openrouter_llm.ainvoke([
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": prompt}
-                        ])
-                        answer = response.content.strip()
-                                       
-                    # Update the answers list at the correct index
-                    answers[index] = answer
-                    logger.info(f"✅ Generated answer for question {index + 1}")
-                    return
-                    
-                except Exception as e:
-                    # Check for 429 error
-                    if "429" in str(e) or "Too Many Requests" in str(e):
-                        wait_time = min(2 ** attempt, 5)  # Cap wait time at 5 seconds
-                        logger.warning(f"Rate limited by LLM API for question {index + 1}. Retrying in {wait_time} seconds...")
-                        await asyncio.sleep(wait_time)
-                    else:
-                        logger.error(f"Error processing question {index + 1}: {str(e)}")
-                        answers[index] = "Unable to process this question at the moment."
-                        return
-            
-            # If we get here, all retries failed
-            answers[index] = "Unable to process this question at the moment."
-            
-        except Exception as e:
-            logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
-            answers[index] = "Unable to process this question at the moment."
 
     async def answer_questions_with_agent(self, questions: List[str], file_hash: str) -> tuple[List[str], List[str]]:
         """Answer questions using LangChain agents with question splitting and enhanced retrieval."""
@@ -1025,7 +709,7 @@ Document Context:
                 max_iterations=5
             )
             
-            # Run the agent
+            # Run the agent˝
             result = await agent_executor.ainvoke({
                 "input": question,
                 "chat_history": []
@@ -1044,151 +728,7 @@ Document Context:
 # Initialize pipeline
 pipeline = PDFRAGPipeline()
 
-
-
-@app.post("/api/v1/hackrx/run", response_model=AnswerResponse)
-async def process_questions(
-    request: QuestionRequest,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Process PDF document and answer questions using Groq
-    
-    - **documents**: URL to PDF document
-    - **questions**: List of questions to answer
-    """
-    try:
-        # Log the complete request JSON body
-        logger.info("📥 REQUEST JSON BODY:")
-        logger.info(f"documents: {request.documents}")
-        logger.info(f"questions: {request.questions}")
-        
-        logger.info(f"📄 Processing request for PDF: {request.documents}")
-        logger.info(f"📝 Questions to answer: {request.questions}")
-        
-        # Check for malicious file types (.zip or .bin)
-        file_type, error_message = get_file_type_and_error(str(request.documents))
-        if file_type in ["bin", "zip"]:
-            logger.warning(f"🚨 {file_type.upper()} file detected: {request.documents}")
-            logger.info(f"✅ Returning {file_type} file warning: {error_message}")
-            return AnswerResponse(answers=[error_message] * len(request.questions))
-        
-        file_hash = hash_filelink(str(request.documents))
-        logger.info(f"🔗 Generated file hash: {file_hash}")
-        
-
-        
-        # Check if this is an Azure blob URL that returns a flight number directly
-        if "hackrx.blob.core.windows.net" in str(request.documents) and "FinalRound3SubmissionPDF.pdf" in str(request.documents):
-            logger.info("✈️ Azure blob URL detected - extracting flight number directly without LLM processing...")
-            try:
-                # Extract flight number directly from the URL
-                flight_result = await extract_pdf_content(str(request.documents))
-                if flight_result and flight_result.get("pages") and len(flight_result["pages"]) > 0:
-                    flight_number = flight_result["pages"][0]["text"]
-                    logger.info(f"✅ Flight number extracted: {flight_number}")
-                    # Return the flight number as the answer for all questions
-                    return AnswerResponse(answers=[flight_number] * len(request.questions))
-                else:
-                    logger.error("❌ Failed to extract flight number from Azure blob URL")
-                    return AnswerResponse(answers=["Error extracting flight number"] * len(request.questions))
-            except Exception as e:
-                logger.error(f"❌ Error processing Azure blob URL: {str(e)}")
-                return AnswerResponse(answers=[f"Error processing URL: {str(e)}"] * len(request.questions))
-        
-        # Process all questions - no MongoDB caching
-        questions_to_process_list = request.questions
-        final_answers = [""] * len(request.questions)
-            
-        # Check if this is a PDF/DOCX or other document type
-        is_pdf_docx = is_pdf_or_docx(str(request.documents))
-        logger.info(f"📄 Document type detection: {'PDF/DOCX' if is_pdf_docx else 'Other (XLSX/PPTX/Image/etc)'}")
-        
-        if is_pdf_docx:
-            # Handle PDF/DOCX with chunking, embedding, and retrieval
-            pkl_path = os.path.join(pipeline.embeddings_dir, f"{file_hash}.pkl")
-            logger.info(f"📁 Checking cache at: {pkl_path}")
-            
-            # Optimization: Check if hash is already processed before downloading
-            if file_hash in pipeline.processed_hashes and os.path.exists(pkl_path):
-                logger.info(f"⚡ Cache hit for document hash: {file_hash}. Using cached embeddings, skipping download and processing.")
-                with open(pkl_path, "rb") as f:
-                    process_result = pickle.load(f)
-                logger.info("✅ Loaded cached embeddings successfully")
-            else:
-                logger.info("🔄 Cache miss - Processing PDF/DOCX through pipeline...")
-                process_result = await pipeline.process_pdf(file_link=str(request.documents))
-                logger.info("✅ PDF/DOCX processing completed")
-            
-            # Answer all questions using enhanced division-based retrieval
-            logger.info(f"🤖 Answering {len(questions_to_process_list)} questions with enhanced division-based retrieval...")
-            final_answers = await pipeline.answer_questions_with_division(questions_to_process_list, llm_provider="groq", file_hash=file_hash)
-            
-            # Cleanup vector store
-            import shutil
-            if os.path.exists(pipeline.vector_store_path):
-                shutil.rmtree(pipeline.vector_store_path)
-        else:
-            # Handle other document types (XLSX, PPTX, Images, etc.) with simple context
-            logger.info("🔄 Processing non-PDF/DOCX document with simple context...")
-            process_result = await pipeline.process_other_document(file_link=str(request.documents))
-            logger.info("✅ Document processing completed")
-            
-            # Answer questions using simple context (no similarity scores)
-            logger.info(f"🤖 Answering {len(questions_to_process_list)} questions with simple context...")
-            final_answers = await pipeline.answer_questions_simple_context(
-                questions_to_process_list, 
-                process_result["full_context"], 
-                llm_provider="groq"
-            )
-        
-        logger.info(f"✅ Request completed successfully")
-        logger.info(f"📊 Final answers count: {len(final_answers)} (expected: {len(request.questions)})")
-        
-        # Log the complete response JSON body
-        logger.info("📤 RESPONSE JSON BODY:")
-        logger.info(f"answers: {final_answers}")
-        
-        return AnswerResponse(answers=final_answers)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
-
-
-@app.post("/api/v1/divide_question", response_model=DivideQuestionResponse)
-async def divide_question(
-    request: DivideQuestionRequest,
-    api_key: str = Depends(verify_api_key)
-):
-    """
-    Divide a broad question into atomic sub-questions using LLM
-    
-    - **questions**: List of questions to divide
-    """
-    try:
-        logger.info(f"🔀 Dividing {len(request.questions)} questions...")
-        
-        # Use the pipeline to divide questions
-        divided_questions = await pipeline.divide_questions(request.questions, llm_provider="groq")
-        
-        logger.info(f"📤 Divided questions: {divided_questions}")
-        
-        return DivideQuestionResponse(divided_questions=divided_questions)
-        
-    except Exception as e:
-        logger.error(f"❌ Error in divide_question endpoint: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error: {str(e)}"
-        )
-
-
-@app.post("/api/v1/hackrx/agent", response_model=AgentAnswerResponse)
+@app.post("/api/v1/hackrx/run", response_model=AgentAnswerResponse)
 async def process_questions_with_agent(
     request: AgentQuestionRequest,
     api_key: str = Depends(verify_api_key)

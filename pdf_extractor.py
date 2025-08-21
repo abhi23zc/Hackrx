@@ -19,10 +19,14 @@ import openai
 import re
 import logging
 from typing import Optional
+import base64
+import io
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
 
 # Set Tesseract path to the working installation for cross-platform support
 def configure_tesseract_path():
@@ -50,14 +54,94 @@ def configure_tesseract_path():
 
 configure_tesseract_path()
 
-async def fetch_image_bytes(url: str) -> bytes:
-    """Download image bytes from a URL using aiohttp."""
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            if response.status != 200:
-                raise Exception(f"Failed to download image: {url}")
-            return await response.read()
+def image_to_base64(image_bytes: bytes) -> Optional[str]:
+    """
+    Convert image bytes to base64 string
+    
+    Args:
+        image_bytes (bytes): Image data as bytes
+        
+    Returns:
+        Optional[str]: Base64 encoded string or None if failed
+    """
+    try:
+        # Open and validate image
+        with Image.open(BytesIO(image_bytes)) as img:
+            # Convert to RGB if necessary
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Save to bytes buffer
+            buffer = io.BytesIO()
+            img.save(buffer, format='JPEG', quality=95)
+            buffer.seek(0)
+            
+            # Convert to base64
+            base64_string = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            print(f"✅ Image converted to base64 successfully: {len(base64_string)} characters")
+            return base64_string
+            
+    except Exception as e:
+        print(f"❌ Error converting image to base64: {e}")
+        return None
 
+def analyze_image_with_gemini(base64_image: str, question: str = "Read and transcribe all text visible in this image exactly as it appears. Preserve the original formatting, spacing, and line breaks. Return the complete text without any additional commentary, explanations, or modifications.") -> str:
+    """
+    Send base64 image to Gemini 2.5 Flash Lite via OpenRouter for text extraction
+    
+    Args:
+        base64_image (str): Base64 encoded image string
+        question (str): Question to ask about the image
+        
+    Returns:
+        str: Gemini's response with extracted text
+    """
+    try:
+        # Get API key from environment
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        if not openrouter_api_key:
+            raise Exception("OPENROUTER_API_KEY environment variable not set")
+        
+        # Create OpenAI client for OpenRouter
+        client = openai.OpenAI(
+            api_key=openrouter_api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
+        
+        # Create message with image
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": question
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    }
+                ]
+            }
+        ]
+        
+        # Generate response from Gemini 2.5 Flash Lite via OpenRouter
+        response = client.chat.completions.create(
+            model="google/gemini-2.5-flash-lite",  # Using Gemini 2.5 Flash Lite via OpenRouter
+            messages=messages,
+            temperature=0.0,  # Set to 0 for exact text extraction
+            max_tokens=1024
+        )
+        
+        if response.choices and response.choices[0].message.content:
+            return response.choices[0].message.content.strip()
+        else:
+            return "❌ No response generated from Gemini"
+            
+    except Exception as e:
+        return f"❌ Error analyzing image with Gemini: {e}"
 
 async def fetch_file_bytes(url: str) -> bytes:
     """Download file bytes from a URL using aiohttp."""
@@ -78,16 +162,7 @@ async def extract_pdf_content(url: str):
     path = parsed_url.path
     ext = os.path.splitext(path)[1].lower()
 
-    # Special handler for Azure blob URL
-    if "hackrx.blob.core.windows.net" in url and "FinalRound3SubmissionPDF.pdf" in url:
-        # Use the complex multi-step LLM processing function
-        openrouter_api_key = "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"
-        if not openrouter_api_key:
-            return {"pages": [{"page": 1, "text": "OPENROUTER_API_KEY not found in environment variables"}]}
-        
-        result = await process_azure_blob_with_llm(url, openrouter_api_key)
-        return {"pages": [{"page": 1, "text": result}]}
-
+ 
     # Handle URLs without extensions (especially for hackrx.in domain)
     if not ext:
         # Make a request to the URL to get the content
@@ -128,11 +203,18 @@ async def extract_pdf_content(url: str):
         return {"pages": [{"part": i+1, "text": doc.page_content} for i, doc in enumerate(docs)]}
 
     elif ext in [".jpg", ".jpeg", ".png"]:
-        image_bytes = await fetch_image_bytes(url)
-        image = Image.open(BytesIO(image_bytes))
-        text = pytesseract.image_to_string(image)
-        print("Image text", text)
-        return {"pages": [{"page": 1, "text": text.strip()}]}
+        image_bytes = await fetch_file_bytes(url)
+        
+        # Convert image to base64
+        base64_image = image_to_base64(image_bytes)
+        if not base64_image:
+            return {"pages": [{"page": 1, "text": "❌ Failed to convert image to base64"}]}
+        
+        # Use Gemini to extract text from image
+        text = analyze_image_with_gemini(base64_image)
+        
+        print("Image text extracted with Gemini:", text)
+        return {"pages": [{"page": 1, "text": text}]}
 
     elif ext in [".xlsx", ".xls"]:
         # Download the Excel file first, then convert to JSON
@@ -206,7 +288,7 @@ async def extract_pdf_content(url: str):
                             
                             # Try OCR with different configurations
                             try:
-                                ocr_text = pytesseract.image_to_string(image, config='--psm 6')
+                                ocr_text = pytesseract.image_to_string(image, config='--psm 6', lang="eng+hin")
                             except:
                                 # Fallback to default configuration
                                 ocr_text = pytesseract.image_to_string(image)
@@ -239,7 +321,6 @@ async def extract_pdf_content(url: str):
         return {"pages": [{"page": i+1, "text": doc.page_content} for i, doc in enumerate(pages)]}
 
 
-async def process_azure_blob_with_llm(url: str, openrouter_api_key: str) -> Optional[str]:
     """
     Multi-step process for Azure blob URLs:
     1. Extract PDF content using PyMuPDF
