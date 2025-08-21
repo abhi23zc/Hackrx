@@ -79,9 +79,9 @@ async def extract_pdf_content(url: str):
     ext = os.path.splitext(path)[1].lower()
 
     # Special handler for Azure blob URL
-    if "hackrx.blob.core.windows.net" in url and "FinalRound4SubmissionPDF.pdf" in url:
+    if "hackrx.blob.core.windows.net" in url and "FinalRound3SubmissionPDF.pdf" in url:
         # Use the complex multi-step LLM processing function
-        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        openrouter_api_key = "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"
         if not openrouter_api_key:
             return {"pages": [{"page": 1, "text": "OPENROUTER_API_KEY not found in environment variables"}]}
         

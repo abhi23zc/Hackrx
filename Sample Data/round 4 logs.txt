@@ -1,0 +1,454 @@
+INFO:     2a09:bac5:3b3d:25af::3c1:42:0 - "POST /api/v1/hackrx/run HTTP/1.1" 200 OK
+INFO:fastapi_app:⏰ Request timer started at: 1754596365.1560516
+INFO:fastapi_app:📥 REQUEST JSON BODY:
+INFO:fastapi_app:documents: https://hackrx.blob.core.windows.net/hackrx/rounds/FinalRound4SubmissionPDF.pdf?sv=2023-01-03&spr=https&st=2025-08-07T14%3A23%3A48Z&se=2027-08-08T14%3A23%3A00Z&sr=b&sp=r&sig=nMtZ2x9aBvz%2FPjRWboEOZIGB%2FaGfNf5TfBOrhGqSv4M%3D
+INFO:fastapi_app:questions: ['What is my flight number?']
+INFO:fastapi_app:📄 Processing request for PDF: https://hackrx.blob.core.windows.net/hackrx/rounds/FinalRound4SubmissionPDF.pdf?sv=2023-01-03&spr=https&st=2025-08-07T14%3A23%3A48Z&se=2027-08-08T14%3A23%3A00Z&sr=b&sp=r&sig=nMtZ2x9aBvz%2FPjRWboEOZIGB%2FaGfNf5TfBOrhGqSv4M%3D
+INFO:fastapi_app:📝 Questions to answer: ['What is my flight number?']
+INFO:fastapi_app:🔗 Generated file hash: efccd1ed052cb693172215aa670abde68e8c470fdeb45765074996a219ff2eb3
+INFO:fastapi_app:🔍 Checking MongoDB for existing QA data...
+INFO:fastapi_app:❌ No document found in MongoDB for hash: efccd1ed052cb693172215aa670abde68e8c470fdeb45765074996a219ff2eb3
+INFO:fastapi_app:❌ No document found in MongoDB, proceeding with full PDF processing...
+INFO:fastapi_app:📄 Document type detection: PDF/DOCX
+INFO:fastapi_app:📁 Checking cache at: embeddings\efccd1ed052cb693172215aa670abde68e8c470fdeb45765074996a219ff2eb3.pkl
+INFO:fastapi_app:🔄 Cache miss - Processing PDF/DOCX through pipeline...
+INFO:fastapi_app:🔍 Extracting PDF content directly from URL...
+INFO:fastapi_app:📄 URL being processed: https://hackrx.blob.core.windows.net/hackrx/rounds/FinalRound4SubmissionPDF.pdf?sv=2023-01-03&spr=https&st=2025-08-07T14%3A23%3A48Z&se=2027-08-08T14%3A23%3A00Z&sr=b&sp=r&sig=nMtZ2x9aBvz%2FPjRWboEOZIGB%2FaGfNf5TfBOrhGqSv4M%3D
+INFO:fastapi_app:✅ PDF extraction completed successfully
+INFO:fastapi_app:✅ Extracted 4 pages
+INFO:fastapi_app:✂️ Chunking text...
+INFO:fastapi_app:✅ Created 7 chunks
+INFO:fastapi_app:🧠 Generating embeddings with HuggingFace model...
+Batches:   0%|                                                                                                                                   | 0/1 [00:00<?, ?it/s]C:\Users\ABHI\Documents\ABHI\Hackrx\venv\Lib\site-packages\torch\nn\modules\module.py:1762: FutureWarning: `encoder_attention_mask` is deprecated and will be removed in version 4.55.0 for `BertSdpaSelfAttention.forward`.
+  return forward_call(*args, **kwargs)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  1.73it/s]
+INFO:fastapi_app:✅ Generated embeddings: (7, 384)
+INFO:fastapi_app:💾 Storing in vector database...
+FAISS index saved to: embeddings\efccd1ed052cb693172215aa670abde68e8c470fdeb45765074996a219ff2eb3_index.faiss
+Metadata saved to: embeddings\efccd1ed052cb693172215aa670abde68e8c470fdeb45765074996a219ff2eb3_metadata.json
+INFO:fastapi_app:✅ Vector store created successfully
+INFO:fastapi_app:✅ PDF/DOCX processing completed
+INFO:fastapi_app:🤖 Answering 1 remaining questions with Groq (timer-based)...
+INFO:fastapi_app:🔍 Processing question 1: What is my flight number? (LLM: groq)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 37.62it/s]
+INFO:fastapi_app:✅ Retrieved 5 relevant chunks for question 1
+INFO:fastapi_app:✅ Reranked to top 3 chunks for question 1
+INFO:fastapi_app:🤖 FINAL PROMPT FOR MAIN PROCESSING (Question 1):
+INFO:fastapi_app:System: You are a HUMAN subject matter expert based strictly on the context of the provided document.
+These documents may include anything.
+
+CRITICAL RULES:
+- Each context chunk will have a similarity score in the format [Score: X.XXXX].
+- Higher similarity scores indicate more relevant information.
+- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return "Question out of scope of the document"
+- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.
+- If needed use numerical figures.
+- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.
+- NO inclusion of any breakpoint characters like '\n' in your answer.
+- Use clear, professional language.
+- Focus on the core information requested.
+
+INFO:fastapi_app:User: Context:
+[Score: 0.5024] GET https://register.hackrx.in/teams/public/flights/getThirdCityFlightNumber  . If landmark belonging to favourite city is "Big Ben", call: GET https://register.hackrx.in/teams/public/flights/getFourthCityFlightNumber . For all other landmarks, call: GET https://register.hackrx.in/teams/public/flights/getFifthCityFlightNumber  💾  Final Deliverable Return the correct ight number based on your answer. Only those who observe carefully will reach their true destination. Good luck, explorer! May the parallel worlds guide your journey home.
+
+[Score: 0.4516] Page 4 of 4 Example: If the response is "Chennai", look it up in the table to nd it has the Charminar landmark. Then based on the instructions, call the appropriate endpoint. ✈  Step 3: Choose Your Flight Path Once you know the landmark associated with your favorite city, follow these instructions: . If landmark belonging to favourite city is "Gateway of India", call: GET https://register.hackrx.in/teams/public/flights/getFirstCityFlightNumber  . If landmark belonging to favourite city is "Taj Mahal", call: GET https://register.hackrx.in/teams/public/flights/getSecondCityFlightNumber . If landmark belonging to favourite city is "Eiffel Tower", call: GET https://register.hackrx.in/teams/public/flights/getThirdCityFlightNumber
+
+[Score: 0.2577] cities. Each city had been swapped with the identity of another, and now it was up to Sachin — and you — to make sense of this twisted map. Your goal: Find the ight number which takes him the real world 🧩  A Tangled Trail — What Sachin Noticed   Indian Cities Landmark Current Location 🏛  Gateway of India Delhi 🏛  India Gate Mumbai 🕌  Charminar Chennai 🏖  Marina Beach Hyderabad 🌉  Howrah Bridge Ahmedabad 🏰  Golconda Fort Mysuru 🗼  Qutub Minar Kochi
+
+
+Question:
+What is my flight number?
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:fastapi_app:✅ Generated answer for question 1
+INFO:fastapi_app:✅ All questions processed within time limit
+INFO:fastapi_app:✅ Request completed in 5.00 seconds
+INFO:fastapi_app:📊 Final answers count: 1 (expected: 1)
+INFO:fastapi_app:⏰ Minimum response time: 2.0s for 1 total questions
+INFO:fastapi_app:📤 RESPONSE JSON BODY:
+INFO:fastapi_app:answers: ["To determine flight number, identify your city's landmark. \nLandmark decides the flight endpoint. \nCall the correct endpoint."]
+INFO:     20.244.56.156:0 - "POST /api/v1/hackrx/run HTTP/1.1" 200 OK
+INFO:fastapi_app:⏰ Request timer started at: 1754596372.7782576
+INFO:fastapi_app:📥 REQUEST JSON BODY:
+INFO:fastapi_app:documents: https://register.hackrx.in/utils/get-secret-token?hackTeam=7767
+INFO:fastapi_app:questions: ['Go to the link and get the secret token and return it']
+INFO:fastapi_app:📄 Processing request for PDF: https://register.hackrx.in/utils/get-secret-token?hackTeam=7767
+INFO:fastapi_app:📝 Questions to answer: ['Go to the link and get the secret token and return it']
+INFO:fastapi_app:🔗 Generated file hash: 79bff0c71db45c0a6f552fce0c7aa70aa527447444a69319285bf7d10e4c9456
+INFO:fastapi_app:🔍 Checking MongoDB for existing QA data...
+INFO:fastapi_app:❌ No document found in MongoDB for hash: 79bff0c71db45c0a6f552fce0c7aa70aa527447444a69319285bf7d10e4c9456
+INFO:fastapi_app:❌ No document found in MongoDB, proceeding with full PDF processing...
+INFO:fastapi_app:📄 Document type detection: Other (XLSX/PPTX/Image/etc)
+INFO:fastapi_app:🔄 Processing non-PDF/DOCX document with simple context...
+INFO:fastapi_app:🔗 Generated file hash: 79bff0c71db45c0a6f552fce0c7aa70aa527447444a69319285bf7d10e4c9456
+INFO:fastapi_app:🔍 Extracting document content directly from URL...
+INFO:fastapi_app:📄 URL being processed: https://register.hackrx.in/utils/get-secret-token?hackTeam=7767
+WARNING:pypdf._reader:invalid pdf header: b'\n    '
+WARNING:pypdf._reader:EOF marker not found
+ERROR:fastapi_app:❌ Document extraction failed: Stream has ended unexpectedly
+ERROR:fastapi_app:❌ Error type: <class 'pypdf.errors.PdfStreamError'>
+INFO:     20.244.56.156:0 - "POST /api/v1/hackrx/run HTTP/1.1" 500 Internal Server Error
+INFO:fastapi_app:⏰ Request timer started at: 1754596375.239101
+INFO:fastapi_app:📥 REQUEST JSON BODY:
+INFO:fastapi_app:documents: https://hackrx.blob.core.windows.net/hackrx/rounds/News.pdf?sv=2023-01-03&spr=https&st=2025-08-07T17%3A10%3A11Z&se=2026-08-08T17%3A10%3A00Z&sr=b&sp=r&sig=ybRsnfv%2B6VbxPz5xF7kLLjC4ehU0NF7KDkXua9ujSf0%3D
+INFO:fastapi_app:questions: ['ട്രംപ് ഏത് ദിവസമാണ് 100% ശുൽകം പ്രഖ്യാപിച്ചത്?', 'ഏത് ഉത്പന്നങ്ങൾക്ക് ഈ 100% ഇറക്കുമതി ശുൽകം ബാധകമാണ്?', 'ഏത് സാഹചര്യത്തിൽ ഒരു കമ്പനിയ്ക്ക് ഈ 100% ശുൽകത്തിൽ നിന്നും നിന്നും ഒഴികെയാക്കും?', 'What was Apple’s investment commitment and what was its objective?', 'What impact will this new policy have on consumers and the global market?']
+INFO:fastapi_app:📄 Processing request for PDF: https://hackrx.blob.core.windows.net/hackrx/rounds/News.pdf?sv=2023-01-03&spr=https&st=2025-08-07T17%3A10%3A11Z&se=2026-08-08T17%3A10%3A00Z&sr=b&sp=r&sig=ybRsnfv%2B6VbxPz5xF7kLLjC4ehU0NF7KDkXua9ujSf0%3D
+INFO:fastapi_app:📝 Questions to answer: ['ട്രംപ് ഏത് ദിവസമാണ് 100% ശുൽകം പ്രഖ്യാപിച്ചത്?', 'ഏത് ഉത്പന്നങ്ങൾക്ക് ഈ 100% ഇറക്കുമതി ശുൽകം ബാധകമാണ്?', 'ഏത് സാഹചര്യത്തിൽ ഒരു കമ്പനിയ്ക്ക് ഈ 100% ശുൽകത്തിൽ നിന്നും നിന്നും ഒഴികെയാക്കും?', 'What was Apple’s investment commitment and what was its objective?', 'What impact will this new policy have on consumers and the global market?']
+INFO:fastapi_app:🔗 Generated file hash: b59dfdc4f954879c76b6b5195db6aacf585a6bfa6911c62595e747239b65d4d5
+INFO:fastapi_app:🔍 Checking MongoDB for existing QA data...
+INFO:fastapi_app:❌ No document found in MongoDB for hash: b59dfdc4f954879c76b6b5195db6aacf585a6bfa6911c62595e747239b65d4d5
+INFO:fastapi_app:❌ No document found in MongoDB, proceeding with full PDF processing...
+INFO:fastapi_app:📄 Document type detection: PDF/DOCX
+INFO:fastapi_app:📁 Checking cache at: embeddings\b59dfdc4f954879c76b6b5195db6aacf585a6bfa6911c62595e747239b65d4d5.pkl
+INFO:fastapi_app:🔄 Cache miss - Processing PDF/DOCX through pipeline...
+INFO:fastapi_app:🔍 Extracting PDF content directly from URL...
+INFO:fastapi_app:📄 URL being processed: https://hackrx.blob.core.windows.net/hackrx/rounds/News.pdf?sv=2023-01-03&spr=https&st=2025-08-07T17%3A10%3A11Z&se=2026-08-08T17%3A10%3A00Z&sr=b&sp=r&sig=ybRsnfv%2B6VbxPz5xF7kLLjC4ehU0NF7KDkXua9ujSf0%3D
+INFO:fastapi_app:✅ PDF extraction completed successfully
+INFO:fastapi_app:✅ Extracted 1 pages
+INFO:fastapi_app:✂️ Chunking text...
+INFO:fastapi_app:✅ Created 1 chunks
+INFO:fastapi_app:🧠 Generating embeddings with HuggingFace model...
+Batches:   0%|                                                                                                                                   | 0/1 [00:00<?, ?it/s]C:\Users\ABHI\Documents\ABHI\Hackrx\venv\Lib\site-packages\torch\nn\modules\module.py:1762: FutureWarning: `encoder_attention_mask` is deprecated and will be removed in version 4.55.0 for `BertSdpaSelfAttention.forward`.
+  return forward_call(*args, **kwargs)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 15.24it/s]
+INFO:fastapi_app:✅ Generated embeddings: (1, 384)
+INFO:fastapi_app:💾 Storing in vector database...
+FAISS index saved to: embeddings\b59dfdc4f954879c76b6b5195db6aacf585a6bfa6911c62595e747239b65d4d5_index.faiss
+Metadata saved to: embeddings\b59dfdc4f954879c76b6b5195db6aacf585a6bfa6911c62595e747239b65d4d5_metadata.json
+INFO:fastapi_app:✅ Vector store created successfully
+INFO:fastapi_app:✅ PDF/DOCX processing completed
+INFO:fastapi_app:🤖 Answering 5 remaining questions with Groq (timer-based)...
+INFO:fastapi_app:🔍 Processing question 1: ട്രംപ് ഏത് ദിവസമാണ് 100% ശുൽകം പ്രഖ്യാപിച്ചത്? (LLM: groq)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 47.91it/s]
+INFO:fastapi_app:✅ Retrieved 5 relevant chunks for question 1
+INFO:fastapi_app:✅ Reranked to top 3 chunks for question 1
+INFO:fastapi_app:🤖 FINAL PROMPT FOR MAIN PROCESSING (Question 1):
+INFO:fastapi_app:System: You are a HUMAN subject matter expert based strictly on the context of the provided document.
+These documents may include anything.
+
+CRITICAL RULES:
+- Each context chunk will have a similarity score in the format [Score: X.XXXX].
+- Higher similarity scores indicate more relevant information.
+- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return "Question out of scope of the document"
+- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.
+- If needed use numerical figures.
+- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.
+- NO inclusion of any breakpoint characters like '\n' in your answer.
+- Use clear, professional language.
+- Focus on the core information requested.
+
+INFO:fastapi_app:User: Context:
+[Score: 0.3404] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+
+Question:
+ട്രംപ് ഏത് ദിവസമാണ് 100% ശുൽകം പ്രഖ്യാപിച്ചത്?
+INFO:fastapi_app:🔍 Processing question 2: ഏത് ഉത്പന്നങ്ങൾക്ക് ഈ 100% ഇറക്കുമതി ശുൽകം ബാധകമാണ്? (LLM: groq)
+Batches:   0%|                                                                                                                                   | 0/1 [00:00<?, ?it/s]C:\Users\ABHI\Documents\ABHI\Hackrx\venv\Lib\site-packages\torch\nn\modules\module.py:1762: FutureWarning: `encoder_attention_mask` is deprecated and will be removed in version 4.55.0 for `BertSdpaSelfAttention.forward`.
+  return forward_call(*args, **kwargs)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 26.08it/s]
+INFO:fastapi_app:✅ Retrieved 5 relevant chunks for question 2
+INFO:fastapi_app:✅ Reranked to top 3 chunks for question 2
+INFO:fastapi_app:🤖 FINAL PROMPT FOR MAIN PROCESSING (Question 2):
+INFO:fastapi_app:System: You are a HUMAN subject matter expert based strictly on the context of the provided document.
+These documents may include anything.
+
+CRITICAL RULES:
+- Each context chunk will have a similarity score in the format [Score: X.XXXX].
+- Higher similarity scores indicate more relevant information.
+- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return "Question out of scope of the document"
+- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.
+- If needed use numerical figures.
+- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.
+- NO inclusion of any breakpoint characters like '\n' in your answer.
+- Use clear, professional language.
+- Focus on the core information requested.
+
+INFO:fastapi_app:User: Context:
+[Score: 0.3449] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+
+Question:
+ഏത് ഉത്പന്നങ്ങൾക്ക് ഈ 100% ഇറക്കുമതി ശുൽകം ബാധകമാണ്?
+INFO:fastapi_app:🔍 Processing question 3: ഏത് സാഹചര്യത്തിൽ ഒരു കമ്പനിയ്ക്ക് ഈ 100% ശുൽകത്തിൽ നിന്നും നിന്നും ഒഴികെയാക്കും? (LLM: groq)
+Batches:   0%|                                                                                                                                   | 0/1 [00:00<?, ?it/s]C:\Users\ABHI\Documents\ABHI\Hackrx\venv\Lib\site-packages\torch\nn\modules\module.py:1762: FutureWarning: `encoder_attention_mask` is deprecated and will be removed in version 4.55.0 for `BertSdpaSelfAttention.forward`.
+  return forward_call(*args, **kwargs)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 40.67it/s]
+INFO:fastapi_app:✅ Retrieved 5 relevant chunks for question 3
+INFO:fastapi_app:✅ Reranked to top 3 chunks for question 3
+INFO:fastapi_app:🤖 FINAL PROMPT FOR MAIN PROCESSING (Question 3):
+INFO:fastapi_app:System: You are a HUMAN subject matter expert based strictly on the context of the provided document.
+These documents may include anything.
+
+CRITICAL RULES:
+- Each context chunk will have a similarity score in the format [Score: X.XXXX].
+- Higher similarity scores indicate more relevant information.
+- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return "Question out of scope of the document"
+- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.
+- If needed use numerical figures.
+- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.
+- NO inclusion of any breakpoint characters like '\n' in your answer.
+- Use clear, professional language.
+- Focus on the core information requested.
+
+INFO:fastapi_app:User: Context:
+[Score: 0.3668] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+
+Question:
+ഏത് സാഹചര്യത്തിൽ ഒരു കമ്പനിയ്ക്ക് ഈ 100% ശുൽകത്തിൽ നിന്നും നിന്നും ഒഴികെയാക്കും?
+INFO:fastapi_app:🔍 Processing question 4: What was Apple’s investment commitment and what was its objective? (LLM: groq)
+Batches:   0%|                                                                                                                                   | 0/1 [00:00<?, ?it/s]C:\Users\ABHI\Documents\ABHI\Hackrx\venv\Lib\site-packages\torch\nn\modules\module.py:1762: FutureWarning: `encoder_attention_mask` is deprecated and will be removed in version 4.55.0 for `BertSdpaSelfAttention.forward`.
+  return forward_call(*args, **kwargs)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 10.29it/s]
+INFO:fastapi_app:✅ Retrieved 5 relevant chunks for question 4
+INFO:fastapi_app:✅ Reranked to top 3 chunks for question 4
+INFO:fastapi_app:🤖 FINAL PROMPT FOR MAIN PROCESSING (Question 4):
+INFO:fastapi_app:System: You are a HUMAN subject matter expert based strictly on the context of the provided document.
+These documents may include anything.
+
+CRITICAL RULES:
+- Each context chunk will have a similarity score in the format [Score: X.XXXX].
+- Higher similarity scores indicate more relevant information.
+- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return "Question out of scope of the document"
+- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.
+- If needed use numerical figures.
+- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.
+- NO inclusion of any breakpoint characters like '\n' in your answer.
+- Use clear, professional language.
+- Focus on the core information requested.
+
+INFO:fastapi_app:User: Context:
+[Score: 0.0458] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+
+Question:
+What was Apple’s investment commitment and what was its objective?
+INFO:fastapi_app:🔍 Processing question 5: What impact will this new policy have on consumers and the global market? (LLM: groq)
+Batches:   0%|                                                                                                                                   | 0/1 [00:00<?, ?it/s]C:\Users\ABHI\Documents\ABHI\Hackrx\venv\Lib\site-packages\torch\nn\modules\module.py:1762: FutureWarning: `encoder_attention_mask` is deprecated and will be removed in version 4.55.0 for `BertSdpaSelfAttention.forward`.
+  return forward_call(*args, **kwargs)
+Batches: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00, 11.28it/s]
+INFO:fastapi_app:✅ Retrieved 5 relevant chunks for question 5
+INFO:fastapi_app:✅ Reranked to top 3 chunks for question 5
+INFO:fastapi_app:🤖 FINAL PROMPT FOR MAIN PROCESSING (Question 5):
+INFO:fastapi_app:System: You are a HUMAN subject matter expert based strictly on the context of the provided document.
+These documents may include anything.
+
+CRITICAL RULES:
+- Each context chunk will have a similarity score in the format [Score: X.XXXX].
+- Higher similarity scores indicate more relevant information.
+- If the query is very clearly out of the domain of the provided context, that is all chunks have a SCORE less than 0.2, instantly return "Question out of scope of the document"
+- If after using the context and all analysis you can't find relevant information, use general knowledge readily available on the internet to answer the query, answering it as if you are answering strictly from the document. Do not say couldn't find in context.
+- If needed use numerical figures.
+- After forming your answer, rephrase it so it means the same but in 2-3 grammatically correct sentences of 8–15 words each.
+- NO inclusion of any breakpoint characters like '\n' in your answer.
+- Use clear, professional language.
+- Focus on the core information requested.
+
+INFO:fastapi_app:User: Context:
+[Score: 0.1141] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+[Score: -340282346638528859811704183484516925440.0000] 2025  ഓഗസ്റ്റ് 6-ന്,    യുഎസ്സ് പ്ര
+ഡൻറ് ഡോഡണൾഡ പ്ര
+ക്ക 100  ശതിമിന്   ശല്ക്ക ഏർടെപ്പുത്ത്ടെമിന്ന് പ്ര
+ഖ്യാ
+ക്കൻ     പ്ര   യുഎസി
+കൾക്ക ഈ ശൽക ബധകമില്ല.   ഈ ന്
+ക്കൻ അന്തർസ്ഥാ,     അഡോമിരാ
+ഡോക്ഷ്യംളുർയുടെ   ആഗമിയ്യാന്മിണ.  ആപ്പു
+ പ്ര
+ഖ്യാ
+രാദ്ധ പ്രിർദ്ധ  ഈ കറ്റമിയു
+ തിറ്ക്കന്ന്.ിഴി
+
+
+Question:
+What impact will this new policy have on consumers and the global market?
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:fastapi_app:✅ Generated answer for question 5
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:httpx:HTTP Request: POST https://openrouter.ai/api/v1/chat/completions "HTTP/1.1 200 OK"
+INFO:fastapi_app:✅ Generated answer for question 4
+INFO:fastapi_app:✅ Generated answer for question 1
+INFO:fastapi_app:✅ Generated answer for question 3
+INFO:fastapi_app:✅ Generated answer for question 2
+INFO:fastapi_app:✅ All questions processed within time limit
+INFO:fastapi_app:✅ Request completed in 17.87 seconds
+INFO:fastapi_app:📊 Final answers count: 5 (expected: 5)
+INFO:fastapi_app:⏰ Minimum response time: 3.0s for 5 total questions
+INFO:fastapi_app:📤 RESPONSE JSON BODY:
+INFO:fastapi_app:answers: ['ഓഗസ്റ്റ് 6ന് പ്രഖ്യാപിച്ചു. \nട്രംപ് പ്രസിഡന്റായിരുന്നു. \nശുൽകം പ്രഖ്യാപിച്ചു.', 'കമ്പ്യൂട്ടർ ചിപ്പുകൾക്ക് ഇറക്കുമതി ശുൽകം ബാധകമാണ്. യുഎസിൽ നിർമ്മിക്കുന്ന കമ്പ്യൂട്ടറുകൾക്ക് ഈ ശുൽകം ബാധകമല്ല. അമേരിക്കൻ അന്തർസ്ഥിതിക്ക് വേണ്ടിയുള്ള നിർമ്മിത സാങ്കേതികവിദ്യയ്ക്ക് ഇത് ലക്ഷ്യമാക്കുന്നു.', 'യുഎസിൽ നിർമ്മിക്കുന്ന കമ്പ്യൂട്ടറുകൾക്ക് ഈ ശുൽകം ബാധകമല്ല. \nഅമേരിക്കയിൽ നിർമ്മിച്ച കമ്പ്യൂട്ടറുകൾക്ക് ഇത് ബാധകമല്ല.\nഅമേരിക്കയിൽ നിർമ്മിച്ച ഉത്പന്നങ്ങൾക്ക് ശുൽകം ഇല്ല.', 'Apple committed $600 billion. Objective was domestic manufacturing.', 'New policy affects consumers greatly. Global market feels impact. Consumers face changes.']
+INFO:     20.244.56.156:0 - "POST /api/v1/hackrx/run HTTP/1.1" 200 OK

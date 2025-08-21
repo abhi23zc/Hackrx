@@ -9,6 +9,15 @@ import logging
 import pickle
 from langchain_openai import ChatOpenAI
 from langchain_community.document_loaders import PyMuPDFLoader
+# Import LangChain agent components
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain.tools import Tool
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.tools import tool
+import requests
+from typing import Optional, Dict, Any
+
 # Import our existing pipeline components
 from pdf_extractor import extract_pdf_content
 from chunker import chunk_text
@@ -69,7 +78,13 @@ class DivideQuestionRequest(BaseModel):
 class DivideQuestionResponse(BaseModel):
     divided_questions: List[str]
 
+class AgentQuestionRequest(BaseModel):
+    documents: HttpUrl
+    questions: List[str]
 
+class AgentAnswerResponse(BaseModel):
+    answers: List[str]
+    agent_reasoning: List[str]
 
 # Add a function to hash the file link
 
@@ -94,7 +109,7 @@ def is_pdf_or_docx(url: str) -> bool:
     ext = os.path.splitext(path)[1].lower()
     
     # Special handler for Azure blob URL (should use simple context)
-    if "hackrx.blob.core.windows.net" in url and "FinalRound4SubmissionPDF.pdf" in url:
+    if "hackrx.blob.core.windows.net" in url and "FinalRound3SubmissionPDF.pdf" in url:
         return False  # Use simple context processing instead of RAG
     
 
@@ -178,8 +193,33 @@ QUESTION_DIVIDER_SYSTEM_PROMPT = (
     "Output: What is the customer database or personal details of other policyholders?"
 )
 
+def escape_curly_braces(text: str) -> str:
+    """Escape curly braces in text to prevent them from being interpreted as template variables."""
+    return text.replace("{", "{{").replace("}", "}}")
 
-
+# Agent tool for web requests
+@tool
+def make_web_request(url: str) -> str:
+    """
+    Make a GET request to a URL and return the response content.
+    Use this tool ONLY when the user explicitly asks you to "making GET request" or fetch information from a specific URL.
+    
+    Args:
+        url: The URL to make a GET request to (must be a valid URL starting with http:// or https://)
+        
+    Returns:
+        The response content as a string (truncated to 1000 characters)
+    """
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        content = response.text
+        # Truncate response to 1000 characters to prevent overly long responses
+        if len(content) > 1000:
+            content = content[:1000]
+        return content
+    except requests.RequestException as e:
+        return f"Error making request to {url}: {str(e)}"
 class PDFRAGPipeline:
     def __init__(self):
         self.setup_groq()
@@ -198,7 +238,7 @@ class PDFRAGPipeline:
         """Configure OpenRouter API with Groq Llama3-70B-instruct"""
         try:
             # Get OpenRouter API key from environment
-            openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+            openrouter_api_key = "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"
             if not openrouter_api_key:
                 logger.error("OPENROUTER_API_KEY not set in environment. Groq LLM will not work.")
                 raise ValueError("OPENROUTER_API_KEY environment variable is required")
@@ -264,9 +304,30 @@ class PDFRAGPipeline:
                 raise
             
             logger.info(f"✅ Extracted {len(pdf_data['pages'])} pages")
-            logger.info("✂️ Chunking text...")
-            chunks = chunk_text(pdf_data["pages"])
-            logger.info(f"✅ Created {len(chunks)} chunks")
+            
+            # Concatenate all pages to get total content length
+            all_text = []
+            for page in pdf_data['pages']:
+                if page.get('text', '').strip():
+                    all_text.append(page['text'].strip())
+            
+            full_content = "\n\n".join(all_text)
+            total_characters = len(full_content)
+            logger.info(f"📊 Total content length: {total_characters} characters")
+            logger.info(f"📊 Character count check: {total_characters} < 10000 = {total_characters < 10000}")
+            
+            # Check if content is small enough to skip chunking
+            if total_characters < 10000:
+                logger.info("📝 Content is less than 10,000 characters - skipping chunking, using full content as single chunk")
+                chunks = [{"text": full_content, "page": "all", "chunk_index": 0}]
+                logger.info("✅ Using full content as single chunk")
+                logger.info(f"📊 Single chunk length: {len(chunks[0]['text'])} characters")
+            else:
+                logger.info("✂️ Content is large - proceeding with chunking...")
+                chunks = chunk_text(pdf_data["pages"])
+                logger.info(f"✅ Created {len(chunks)} chunks")
+                logger.info(f"📊 Total chunks length: {sum(len(chunk['text']) for chunk in chunks)} characters")
+            
             logger.info("🧠 Generating embeddings with HuggingFace model...")
             texts, embeddings = generate_embeddings(chunks)
             logger.info(f"✅ Generated embeddings: {getattr(embeddings, 'shape', type(embeddings))}")
@@ -369,7 +430,9 @@ class PDFRAGPipeline:
             logger.info(f"🤖 Processing question {index + 1}: {question[:50]}...")
             
             # Build prompt with simple context (no similarity scores)
-            prompt = SIMPLE_SYSTEM_PROMPT + "\n\nContext:\n" + full_context + "\n\nQuestion:\n" + question.strip()
+            # Escape curly braces in context to prevent any template issues
+            escaped_context = escape_curly_braces(full_context)
+            prompt = SIMPLE_SYSTEM_PROMPT + "\n\nContext:\n" + escaped_context + "\n\nQuestion:\n" + question.strip()
             
             # Log the final prompt being sent to LLM for simple context processing
             logger.info(f"🤖 FINAL PROMPT FOR SIMPLE CONTEXT (Question {index + 1}):")
@@ -554,6 +617,8 @@ class PDFRAGPipeline:
                 
                 # Build prompt with 10 chunks
                 prompt = build_prompt_without_sources(original_question, retrieved)
+                # Escape curly braces in prompt to prevent any template issues
+                prompt = escape_curly_braces(prompt)
                 system_prompt = GENERAL_SYSTEM_PROMPT
                 
                 # Log the final prompt being sent to LLM for undivided question processing
@@ -587,6 +652,8 @@ class PDFRAGPipeline:
                 
                 # Build prompt with combined chunks
                 prompt = build_prompt_without_sources(original_question, unique_chunks)
+                # Escape curly braces in prompt to prevent any template issues
+                prompt = escape_curly_braces(prompt)
                 system_prompt = GENERAL_SYSTEM_PROMPT
             
             # Log the final prompt being sent to LLM for division-based processing
@@ -662,6 +729,8 @@ class PDFRAGPipeline:
             
             # Step 2: Build optimized prompt with similarity scores (using all 10 chunks)
             prompt = build_prompt_without_sources(question, retrieved)
+            # Escape curly braces in prompt to prevent any template issues
+            prompt = escape_curly_braces(prompt)
             system_prompt = GENERAL_SYSTEM_PROMPT
             
             # Log the final prompt being sent to LLM for main processing
@@ -719,6 +788,259 @@ class PDFRAGPipeline:
             logger.error(f"Error processing question {index + 1}: {repr(e)}", exc_info=True)
             answers[index] = "Unable to process this question at the moment."
 
+    async def answer_questions_with_agent(self, questions: List[str], file_hash: str) -> tuple[List[str], List[str]]:
+        """Answer questions using LangChain agents with question splitting and enhanced retrieval."""
+        try:
+            answers = [""] * len(questions)
+            reasoning = [""] * len(questions)
+            
+            # Step 1: Divide all questions into sub-questions
+            logger.info("🔀 Dividing questions into sub-questions for agent processing...")
+            divided_questions = await self.divide_questions(questions, llm_provider="groq")
+            logger.info(f"✅ Questions divided: {divided_questions}")
+            
+            # Step 2: Process each original question with its divided sub-questions concurrently
+            tasks = []
+            for i, (original_question, divided_result) in enumerate(zip(questions, divided_questions)):
+                task = asyncio.create_task(self._process_single_question_with_agent(i, original_question, divided_result, file_hash, answers, reasoning))
+                tasks.append(task)
+            
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            logger.info("✅ All agent questions processed successfully")
+            return answers, reasoning
+            
+        except Exception as e:
+            logger.error(f"❌ Error in agent processing: {e}")
+            return [f"Error: {str(e)}"] * len(questions), ["Agent setup failed"] * len(questions)
+
+    async def _process_single_question_with_agent(self, index: int, original_question: str, divided_result: str, file_hash: str, answers: List[str], reasoning: List[str]):
+        """Process a single question using agent with division and enhanced retrieval."""
+        try:
+            logger.info(f"🤖 Agent processing question {index + 1} with division: {original_question}")
+            
+            # Parse divided questions by semicolon delimiter
+            sub_questions = [q.strip() for q in divided_result.split(';') if q.strip()]
+            logger.info(f"📝 Sub-questions for question {index + 1}: {sub_questions}")
+            
+            # Step 3: Retrieve chunks for main question and all sub-questions
+            all_chunks = []
+            
+            # Retrieve for main question
+            index_path = os.path.join(self.embeddings_dir, f"{file_hash}_index.faiss")
+            meta_path = os.path.join(self.embeddings_dir, f"{file_hash}_metadata.json")
+            
+            main_retrieved = retrieve_top_k(original_question, k=5, index_path=index_path, meta_path=meta_path)
+            all_chunks.extend(main_retrieved)
+            
+            # Retrieve for each sub-question
+            for sub_question in sub_questions:
+                sub_retrieved = retrieve_top_k(sub_question, k=3, index_path=index_path, meta_path=meta_path)
+                all_chunks.extend(sub_retrieved)
+            
+            # Remove duplicates based on text content
+            unique_chunks = []
+            seen_texts = set()
+            for chunk in all_chunks:
+                if chunk["text"] not in seen_texts:
+                    unique_chunks.append(chunk)
+                    seen_texts.add(chunk["text"])
+            
+            logger.info(f"🔄 Combined {len(all_chunks)} chunks into {len(unique_chunks)} unique chunks for question {index + 1}")
+            
+            # Step 4: Build context from all chunks
+            context_parts = []
+            for j, chunk in enumerate(unique_chunks):
+                context_parts.append(f"Chunk {j+1} [Score: {chunk.get('score', 'N/A'):.4f}]:\n{chunk['text']}")
+            
+            combined_context = "\n\n".join(context_parts)
+            
+            # Step 5: Create tools for the agent
+            tools = [
+                Tool(
+                    name="web_request",
+                    func=make_web_request,
+                    description="Make a GET request to a URL. ONLY use if user explicitly asks for 'making GET request' or to fetch from a specific URL. Requires a valid URL parameter."
+                )
+            ]
+            
+            # Step 6: Create the agent prompt using the general system prompt
+            # Escape curly braces in context to prevent template variable interpretation
+            escaped_context = escape_curly_braces(combined_context)
+            system_prompt = f"""{GENERAL_SYSTEM_PROMPT}
+
+IMPORTANT: You have access to a web_request tool that can make GET requests to URLs. 
+ONLY use this tool if the user explicitly asks you to "making GET request" or fetch information from a specific URL.
+If no web request is needed, answer based on the document context only.
+
+Document Context:
+{escaped_context}"""
+
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{input}"),
+                MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ])
+            
+            # Log the final prompt being sent to agent
+            logger.info(f"🤖 FINAL AGENT PROMPT (Question {index + 1}):")
+            logger.info(f"System: {system_prompt}")
+            logger.info(f"User Question: {original_question}")
+            
+            # Log the exact formatted prompt that will be sent to the LLM
+            try:
+                formatted_prompt = prompt.format_messages(
+                    input=original_question,
+                    chat_history=[],
+                    agent_scratchpad=[]
+                )
+                logger.info(f"🤖 EXACT LLM PROMPT (Question {index + 1}):")
+                for i, message in enumerate(formatted_prompt):
+                    logger.info(f"Message {i+1} ({message.type}): {message.content}")
+            except Exception as format_error:
+                logger.warning(f"⚠️ Could not format prompt for logging (Question {index + 1}): {format_error}")
+                logger.info(f"🤖 PROMPT TEMPLATE (Question {index + 1}): {prompt}")
+            
+            # Step 7: Create the agent
+            agent = create_openai_tools_agent(
+                llm=self.openrouter_llm,
+                tools=tools,
+                prompt=prompt
+            )
+            
+            # Step 8: Create the agent executor
+            agent_executor = AgentExecutor(
+                agent=agent,
+                tools=tools,
+                verbose=True,
+                handle_parsing_errors=True,
+                max_iterations=5
+            )
+            
+            # Step 9: Run the agent
+            result = await agent_executor.ainvoke({
+                "input": original_question,
+                "chat_history": []
+            })
+            
+            answers[index] = result["output"]
+            reasoning[index] = f"Agent used question division ({len(sub_questions)} sub-questions) and tools: {', '.join([tool.name for tool in tools if tool.name in str(result)])}"
+            
+            logger.info(f"✅ Agent completed question {index + 1}")
+            
+        except Exception as e:
+            logger.error(f"❌ Agent error on question {index + 1}: {e}")
+            answers[index] = f"Error processing question: {str(e)}"
+            reasoning[index] = "Agent encountered an error"
+
+    async def answer_questions_with_agent_simple_context(self, questions: List[str], full_context: str) -> tuple[List[str], List[str]]:
+        """Answer questions using LangChain agents with simple context (no similarity scores) for non-PDF/DOCX documents."""
+        try:
+            answers = [""] * len(questions)
+            reasoning = [""] * len(questions)
+            
+            # Process each question directly with the full context concurrently
+            tasks = []
+            for i, question in enumerate(questions):
+                task = asyncio.create_task(self._process_single_question_with_agent_simple_context(i, question, full_context, answers, reasoning))
+                tasks.append(task)
+            
+            # Wait for all tasks to complete
+            await asyncio.gather(*tasks, return_exceptions=True)
+            
+            logger.info("✅ All agent simple context questions processed successfully")
+            return answers, reasoning
+            
+        except Exception as e:
+            logger.error(f"❌ Error in agent simple context processing: {e}")
+            return [f"Error: {str(e)}"] * len(questions), ["Agent setup failed"] * len(questions)
+
+    async def _process_single_question_with_agent_simple_context(self, index: int, question: str, full_context: str, answers: List[str], reasoning: List[str]):
+        """Process a single question using agent with simple context."""
+        try:
+            logger.info(f"🤖 Agent processing question {index + 1} with simple context: {question}")
+            
+            # Create tools for the agent
+            tools = [
+                Tool(
+                    name="web_request",
+                    func=make_web_request,
+                    description="Make a GET request to a URL. ONLY use if user explicitly asks for 'making GET request' or to fetch from a specific URL. Requires a valid URL parameter."
+                )
+            ]
+            
+            # Create the agent prompt with simple context using the simple system prompt
+            # Escape curly braces in context to prevent template variable interpretation
+            escaped_context = escape_curly_braces(full_context)
+            system_prompt = f"""{SIMPLE_SYSTEM_PROMPT}
+
+IMPORTANT: You have access to a web_request tool that can make GET requests to URLs. 
+ONLY use this tool if the user explicitly asks you to "making GET request" or fetch information from a specific URL.
+If no web request is needed, answer based on the document context only.
+
+Document Context:
+{escaped_context}"""
+
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                MessagesPlaceholder(variable_name="chat_history"),
+                ("human", "{input}"),
+                MessagesPlaceholder(variable_name="agent_scratchpad"),
+            ])
+            
+            # Log the final prompt being sent to agent
+            logger.info(f"🤖 FINAL AGENT PROMPT (Simple Context - Question {index + 1}):")
+            logger.info(f"System: {system_prompt}")
+            logger.info(f"User Question: {question}")
+            
+            # Log the exact formatted prompt that will be sent to the LLM
+            try:
+                formatted_prompt = prompt.format_messages(
+                    input=question,
+                    chat_history=[],
+                    agent_scratchpad=[]
+                )
+                logger.info(f"🤖 EXACT LLM PROMPT (Simple Context - Question {index + 1}):")
+                for i, message in enumerate(formatted_prompt):
+                    logger.info(f"Message {i+1} ({message.type}): {message.content}")
+            except Exception as format_error:
+                logger.warning(f"⚠️ Could not format prompt for logging (Simple Context - Question {index + 1}): {format_error}")
+                logger.info(f"🤖 PROMPT TEMPLATE (Simple Context - Question {index + 1}): {prompt}")
+            
+            # Create the agent
+            agent = create_openai_tools_agent(
+                llm=self.openrouter_llm,
+                tools=tools,
+                prompt=prompt
+            )
+            
+            # Create the agent executor
+            agent_executor = AgentExecutor(
+                agent=agent,
+                tools=tools,
+                verbose=True,
+                handle_parsing_errors=True,
+                max_iterations=5
+            )
+            
+            # Run the agent
+            result = await agent_executor.ainvoke({
+                "input": question,
+                "chat_history": []
+            })
+            
+            answers[index] = result["output"]
+            reasoning[index] = f"Agent used simple context processing with tools: {', '.join([tool.name for tool in tools if tool.name in str(result)])}"
+            
+            logger.info(f"✅ Agent completed question {index + 1} with simple context")
+            
+        except Exception as e:
+            logger.error(f"❌ Agent error on question {index + 1}: {e}")
+            answers[index] = f"Error processing question: {str(e)}"
+            reasoning[index] = "Agent encountered an error"
+
 # Initialize pipeline
 pipeline = PDFRAGPipeline()
 
@@ -757,7 +1079,7 @@ async def process_questions(
 
         
         # Check if this is an Azure blob URL that returns a flight number directly
-        if "hackrx.blob.core.windows.net" in str(request.documents) and "FinalRound4SubmissionPDF.pdf" in str(request.documents):
+        if "hackrx.blob.core.windows.net" in str(request.documents) and "FinalRound3SubmissionPDF.pdf" in str(request.documents):
             logger.info("✈️ Azure blob URL detected - extracting flight number directly without LLM processing...")
             try:
                 # Extract flight number directly from the URL
@@ -860,6 +1182,100 @@ async def divide_question(
         
     except Exception as e:
         logger.error(f"❌ Error in divide_question endpoint: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@app.post("/api/v1/hackrx/agent", response_model=AgentAnswerResponse)
+async def process_questions_with_agent(
+    request: AgentQuestionRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Process PDF document and answer questions using LangChain agents with web request capabilities
+    
+    - **documents**: URL to PDF document
+    - **questions**: List of questions to answer
+    """
+    try:
+        # Log the complete request JSON body
+        logger.info("📥 AGENT REQUEST JSON BODY:")
+        logger.info(f"documents: {request.documents}")
+        logger.info(f"questions: {request.questions}")
+        
+        logger.info(f"📄 Processing agent request for PDF: {request.documents}")
+        logger.info(f"📝 Questions to answer with agent: {request.questions}")
+        
+        # Check for malicious file types (.zip or .bin)
+        file_type, error_message = get_file_type_and_error(str(request.documents))
+        if file_type in ["bin", "zip"]:
+            logger.warning(f"🚨 {file_type.upper()} file detected: {request.documents}")
+            logger.info(f"✅ Returning {file_type} file warning: {error_message}")
+            return AgentAnswerResponse(
+                answers=[error_message] * len(request.questions),
+                agent_reasoning=["File type blocked"] * len(request.questions)
+            )
+        
+        file_hash = hash_filelink(str(request.documents))
+        logger.info(f"🔗 Generated file hash: {file_hash}")
+        
+        # Check if this is a PDF/DOCX or other document type
+        is_pdf_docx = is_pdf_or_docx(str(request.documents))
+        logger.info(f"📄 Document type detection: {'PDF/DOCX' if is_pdf_docx else 'Other (XLSX/PPTX/Image/etc)'}")
+        
+        if is_pdf_docx:
+            # Handle PDF/DOCX with chunking, embedding, and retrieval
+            pkl_path = os.path.join(pipeline.embeddings_dir, f"{file_hash}.pkl")
+            logger.info(f"📁 Checking cache at: {pkl_path}")
+            
+            # Optimization: Check if hash is already processed before downloading
+            if file_hash in pipeline.processed_hashes and os.path.exists(pkl_path):
+                logger.info(f"⚡ Cache hit for document hash: {file_hash}. Using cached embeddings, skipping download and processing.")
+                with open(pkl_path, "rb") as f:
+                    process_result = pickle.load(f)
+                logger.info("✅ Loaded cached embeddings successfully")
+            else:
+                logger.info("🔄 Cache miss - Processing PDF/DOCX through pipeline...")
+                process_result = await pipeline.process_pdf(file_link=str(request.documents))
+                logger.info("✅ PDF/DOCX processing completed")
+            
+            # Answer all questions using agent
+            logger.info(f"🤖 Answering {len(request.questions)} questions with LangChain agent...")
+            final_answers, agent_reasoning = await pipeline.answer_questions_with_agent(request.questions, file_hash)
+            
+            # Cleanup vector store
+            import shutil
+            if os.path.exists(pipeline.vector_store_path):
+                shutil.rmtree(pipeline.vector_store_path)
+        else:
+            # For non-PDF/DOCX documents, use agent with simple context
+            logger.info("🔄 Processing non-PDF/DOCX document with agent...")
+            process_result = await pipeline.process_other_document(file_link=str(request.documents))
+            logger.info("✅ Document processing completed")
+            
+            # Answer all questions using agent with simple context
+            logger.info(f"🤖 Answering {len(request.questions)} questions with agent (simple context)...")
+            final_answers, agent_reasoning = await pipeline.answer_questions_with_agent_simple_context(
+                request.questions, 
+                process_result["full_context"]
+            )
+        
+        logger.info(f"✅ Agent request completed successfully")
+        logger.info(f"📊 Final answers count: {len(final_answers)} (expected: {len(request.questions)})")
+        
+        # Log the complete response JSON body
+        logger.info("📤 AGENT RESPONSE JSON BODY:")
+        logger.info(f"answers: {final_answers}")
+        logger.info(f"agent_reasoning: {agent_reasoning}")
+        
+        return AgentAnswerResponse(answers=final_answers, agent_reasoning=agent_reasoning)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in agent endpoint: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
